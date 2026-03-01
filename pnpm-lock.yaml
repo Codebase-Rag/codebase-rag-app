@@ -29,9 +29,6 @@ importers:
       meow:
         specifier: ^11.0.0
         version: 11.0.0
-      react:
-        specifier: ^18.2.0
-        version: 18.3.1
       socket.io:
         specifier: ^4.8.3
         version: 4.8.3
@@ -69,6 +66,9 @@ importers:
       prettier:
         specifier: ^2.8.7
         version: 2.8.8
+      react:
+        specifier: ^18.2.0
+        version: 18.3.1
       ts-node:
         specifier: ^10.9.1
         version: 10.9.2(@types/node@25.2.2)(typescript@5.9.3)
