@@ -8,7 +8,7 @@ type Props = {
 	edit?: boolean;
 };
 
-export default function Message({role, text, edit}: Props) {
+function Message({role, text, edit}: Props) {
 	if (role === 'user') {
 		return (
 			<Box>
@@ -29,3 +29,6 @@ export default function Message({role, text, edit}: Props) {
 		</Box>
 	);
 }
+
+const MemoizedMessage = React.memo(Message);
+export default MemoizedMessage;

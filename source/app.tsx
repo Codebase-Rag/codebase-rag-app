@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 
-import { Box, Text, useApp } from 'ink';
+import { Box, Text, useApp, Static } from 'ink';
 import Header from './components/Header.js';
 import Message from './components/Message.js';
 import Input from './components/Input.js';
@@ -175,11 +175,11 @@ export default function App() {
 				<SelectInput items={modes} onSelect={m => setMode(m.value)} />
 			)}
 			{(mode) && (
-				<Box flexDirection="column" marginTop={1}>
-					{messages.map((msg, i) => (
+				<Static items={messages}>
+					{(msg, i) => (
 						<Message key={i} role={msg.role} text={msg.text} edit={msg.edit} />
-					))}
-				</Box>
+					)}
+				</Static>
 			)}
 			{(error || connectionError) && (
 				<Box marginTop={1}>
