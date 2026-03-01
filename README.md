@@ -1,4 +1,4 @@
-# Codebase RAG TUI
+# Codebase RAG
 
 A terminal-based AI coding assistant that uses Retrieval-Augmented Generation (RAG) and Abstract Syntax Tree (AST) analysis to provide context-aware code review and modification. It parses your codebase into a knowledge graph, then gives an LLM precise, structural context when answering questions or making edits.
 
@@ -38,79 +38,41 @@ Python, JavaScript, TypeScript, Java, C++, Rust, Go, Lua, Scala.
 
 ## Prerequisites
 
-- **Node.js** >= 16 and **pnpm**
-- **Python** >= 3.12 and [**uv**](https://github.com/astral-sh/uv) (fast Python package manager)
-- **Docker** and **Docker Compose** (if running services via Docker)
+- **Linux** environment (required)
+- **Node.js** >= 16 and [**pnpm**](https://pnpm.io/)
+- **Python** >= 3.12 and [**uv**](https://github.com/astral-sh/uv)
+- **make**
+- **Docker** and **Docker Compose** (for Memgraph, Redis, and Postgres)
 - An LLM provider API key (Google, OpenAI, Vertex AI, or a local Ollama endpoint)
 
 ## Setup
 
 ### 1. Environment Variables
 
-Create a `.env` file in the project root (used by both frontend and backend):
-
-```env
-# Backend URI for the frontend to connect to
-BACKEND_URI=http://localhost:8000
-
-# LLM provider settings (orchestrator — the main reasoning model)
-ORCHESTRATOR_PROVIDER=google        # google | openai | vertexai
-ORCHESTRATOR_MODEL=gemini-2.0-flash
-ORCHESTRATOR_API_KEY=your-api-key
-
-# LLM provider settings (cypher — translates queries to graph queries)
-CYPHER_PROVIDER=google
-CYPHER_MODEL=gemini-2.0-flash
-CYPHER_API_KEY=your-api-key
-
-# Infrastructure (defaults work with Docker Compose)
-MEMGRAPH_HOST=localhost
-MEMGRAPH_PORT=7687
-REDIS_HOST=localhost
-REDIS_PORT=6379
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-POSTGRES_USER=codebase_rag
-POSTGRES_PASSWORD=codebase_rag
-POSTGRES_DB=codebase_rag
+```bash
+cp .env.example .env
 ```
+
+Fill in your LLM provider API keys and any other settings in the `.env` file.
 
 ### 2. Start the Backend
 
-#### Option A: Docker Compose (recommended)
-
-This starts the API server alongside Memgraph, Redis, and Postgres:
+Start the infrastructure services:
 
 ```bash
 cd api
-cp ../.env .env          # or create a separate .env here
-docker compose up -d
+docker compose up -d     # starts Memgraph, Redis, and Postgres
 ```
 
-The API will be available at `http://localhost:8000`.
+Then start the API server:
+
+```bash
+cd api
+uv sync                  # install Python dependencies
+make                     # starts the FastAPI server on port 8000
+```
 
 You can also access the **Memgraph Lab** UI at `http://localhost:3000` to visually explore the knowledge graph.
-
-#### Option B: Run Locally
-
-Install infrastructure services (Memgraph, Redis, Postgres) separately, then:
-
-```bash
-cd api
-make install             # installs Python deps with full language support
-make              # starts the FastAPI server on port 8000
-```
-
-Other useful Make targets:
-
-| Command              | Description                                    |
-| -------------------- | ---------------------------------------------- |
-| `make install`       | Install dependencies with all Tree-sitter grammars |
-| `make dev`           | Install with dev/test extras + pre-commit hooks |
-| `make test`          | Run tests                                      |
-| `make test-parallel` | Run tests in parallel                          |
-| `make watch REPO_PATH=/path/to/repo` | Watch a repo for changes and update the graph in real-time |
-| `make clean`         | Remove caches and build artifacts              |
 
 ### 3. Start the Frontend
 
