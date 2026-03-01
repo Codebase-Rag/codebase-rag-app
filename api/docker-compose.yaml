@@ -1,0 +1,39 @@
+services:
+  app:
+    image: e3ancc/codebase-rag-api:latest
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      MEMGRAPH_HOST: memgraph
+      REDIS_HOST: redis
+      POSTGRES_HOST: postgres
+    depends_on:
+      - memgraph
+      - redis
+      - postgres
+    restart: unless-stopped
+  memgraph:
+    image: memgraph/memgraph-mage
+    ports:
+      - "${MEMGRAPH_PORT:-7687}:7687"
+      - "${MEMGRAPH_HTTP_PORT:-7444}:7444"
+  lab:
+    image: memgraph/lab
+    ports:
+      - "${LAB_PORT:-3000}:3000"
+    environment:
+      QUICK_CONNECT_MG_HOST: memgraph
+  redis:
+    image: "redis:alpine"
+    ports:
+      - "6379:6379"
+  postgres:
+    image: "postgres:16-alpine"
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-codebase_rag}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-codebase_rag}"
+      POSTGRES_DB: "${POSTGRES_DB:-codebase_rag}"

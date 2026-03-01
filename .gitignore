@@ -1,0 +1,21 @@
+# Frontend
+node_modules
+dist
+
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+.env
+.tmp
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.claude/
+.qdrant_code_embeddings/
