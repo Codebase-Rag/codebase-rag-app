@@ -1,6 +1,6 @@
 {
 	"name": "codebase-rag-tui",
-	"version": "0.2.0",
+	"version": "0.3.2",
 	"description": "Terminal-based AI agent for codebase RAG (Retrieval-Augmented Generation)",
 	"license": "MIT",
 	"author": "johnsonafool",
