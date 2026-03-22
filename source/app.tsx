@@ -5,7 +5,7 @@ import Header from './components/Header.js';
 import Message from './components/Message.js';
 import Input from './components/Input.js';
 import TreeAnimation from './components/TreeAnimation.js';
-import { sendMessage, rejectChange } from './api/chat.js';
+import { sendMessage, sendMessageStream, rejectChange } from './api/chat.js';
 import { useSocket } from './contexts/SocketContext.js';
 import { getWorkspaceInfo } from './utils/workspace.js';
 import { useWorkspace } from './contexts/WorkspaceContext.js';
@@ -39,6 +39,7 @@ export default function App() {
 	]
 
 	const [showAnimation, setShowAnimation] = useState(true);
+	const [streamingMessage, setStreamingMessage] = useState<string>('');
 
 	const handleAnimationComplete = useCallback(() => {
 		setShowAnimation(false);
@@ -147,16 +148,54 @@ export default function App() {
 		}
 
 		try {
-			if (sessionId) {
-				const res = await sendMessage(text, socket.id, mode!, sessionId);
-				setMessages((prev) => [...prev, {role: 'model', text: res.response, edit: res.edit}]);
-				if (res.edit) setPendingReview(true);
-			} else {
-				const res = await sendMessage(text, socket.id, mode!);
-				setSessionId(res.session_id);
-				setMessages((prev) => [...prev, {role: 'model', text: res.response, edit: res.edit}]);
-				if (res.edit) setPendingReview(true);
+			// Add empty message placeholder for streaming response
+			setStreamingMessage('');
+			
+			const stream = await sendMessageStream(text, socket.id, mode!, sessionId || undefined);
+			const reader = stream.getReader();
+			const decoder = new TextDecoder();
+			let currentSessionId = sessionId;
+			let edit = false;
+			let accumulatedMessage = '';
+
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+
+				const decodedText = decoder.decode(value, { stream: true });
+				const lines = decodedText.split('\n');
+
+				for (const line of lines) {
+					if (line.startsWith('data: ')) {
+						const data = line.slice(6);
+						if (data === '[DONE]') continue;
+
+						try {
+							const parsed = JSON.parse(data);
+							
+							if (parsed.session_id) {
+								// First message contains session_id and edit status
+								currentSessionId = parsed.session_id;
+								edit = parsed.edit;
+								if (!sessionId) {
+									setSessionId(currentSessionId);
+								}
+							} else if (parsed.chunk) {
+								// Streaming chunk
+								accumulatedMessage += parsed.chunk;
+								setStreamingMessage(accumulatedMessage);
+							}
+						} catch (e) {
+							// Ignore parsing errors for non-JSON data
+						}
+					}
+				}
 			}
+
+			// Finalize the message
+			setMessages((prev) => [...prev, {role: 'model', text: accumulatedMessage, edit}]);
+			setStreamingMessage('');
+			if (edit) setPendingReview(true);
 		} catch (err: unknown) {
 			const message =
 				err instanceof Error ? err.message : 'Unknown error occurred';
@@ -175,11 +214,16 @@ export default function App() {
 				<SelectInput items={modes} onSelect={m => setMode(m.value)} />
 			)}
 			{(mode) && (
-				<Static items={messages}>
-					{(msg, i) => (
-						<Message key={i} role={msg.role} text={msg.text} edit={msg.edit} />
+				<>
+					<Static items={messages}>
+						{(msg, i) => (
+							<Message key={i} role={msg.role} text={msg.text} edit={msg.edit} />
+						)}
+					</Static>
+					{streamingMessage && (
+						<Message role="model" text={streamingMessage} edit={false} />
 					)}
-				</Static>
+				</>
 			)}
 			{(error || connectionError) && (
 				<Box marginTop={1}>
