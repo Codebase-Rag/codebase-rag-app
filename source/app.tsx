@@ -5,7 +5,7 @@ import Header from './components/Header.js';
 import Message from './components/Message.js';
 import Input from './components/Input.js';
 import TreeAnimation from './components/TreeAnimation.js';
-import { sendMessage, sendMessageStream, rejectChange } from './api/chat.js';
+import { sendMessageStream, rejectChange } from './api/chat.js';
 import { useSocket } from './contexts/SocketContext.js';
 import { getWorkspaceInfo } from './utils/workspace.js';
 import { useWorkspace } from './contexts/WorkspaceContext.js';
@@ -182,7 +182,7 @@ export default function App() {
 								}
 							} else if (parsed.chunk) {
 								// Streaming chunk
-								accumulatedMessage += parsed.chunk;
+								accumulatedMessage = parsed.chunk;
 								setStreamingMessage(accumulatedMessage);
 							}
 						} catch (e) {
