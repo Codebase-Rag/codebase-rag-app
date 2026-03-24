@@ -5,7 +5,7 @@ import Header from './components/Header.js';
 import Message from './components/Message.js';
 import Input from './components/Input.js';
 import TreeAnimation from './components/TreeAnimation.js';
-import { sendMessage, rejectChange } from './api/chat.js';
+import { sendMessageStream, rejectChange } from './api/chat.js';
 import { useSocket } from './contexts/SocketContext.js';
 import { getWorkspaceInfo } from './utils/workspace.js';
 import { useWorkspace } from './contexts/WorkspaceContext.js';
@@ -19,7 +19,7 @@ type MessageItem = {
 
 export default function App() {
 	const {exit} = useApp();
-	const { socket, isConnected, isConnecting, connectionError } = useSocket();
+	const { socket, isConnected, isConnecting, connectionError, tool } = useSocket();
 	const { workspace, setWorkspace } = useWorkspace();
 	const [messages, setMessages] = useState<MessageItem[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
@@ -39,6 +39,22 @@ export default function App() {
 	]
 
 	const [showAnimation, setShowAnimation] = useState(true);
+	const [streamingMessage, setStreamingMessage] = useState<string>('');
+	const [thinkingDots, setThinkingDots] = useState<string>('.');
+
+	useEffect(() => {
+		if (!isLoading) return;
+
+		const interval = setInterval(() => {
+			setThinkingDots((prev) => {
+				if (prev === '.') return '..';
+				if (prev === '..') return '...';
+				return '.';
+			});
+		}, 500);
+
+		return () => clearInterval(interval);
+	}, [isLoading]);
 
 	const handleAnimationComplete = useCallback(() => {
 		setShowAnimation(false);
@@ -106,18 +122,6 @@ export default function App() {
 			return;
 		}
 
-		// if (text === '/agent') {
-		// 	setMode('agent');
-		// 	setMessages((prev) => [...prev, {role: 'model', text: 'Switched to agent mode'}]);
-		// 	return;
-		// }
-
-		// if (text === '/chat') {
-		// 	setMode('chat');
-		// 	setMessages((prev) => [...prev, {role: 'model', text: 'Switched to chat mode'}]);
-		// 	return;
-		// }
-
 		setMessages((prev) => [...prev, {role: 'user', text, edit: false}]);
 
 		if(workspace == process.cwd()) {
@@ -147,16 +151,54 @@ export default function App() {
 		}
 
 		try {
-			if (sessionId) {
-				const res = await sendMessage(text, socket.id, mode!, sessionId);
-				setMessages((prev) => [...prev, {role: 'model', text: res.response, edit: res.edit}]);
-				if (res.edit) setPendingReview(true);
-			} else {
-				const res = await sendMessage(text, socket.id, mode!);
-				setSessionId(res.session_id);
-				setMessages((prev) => [...prev, {role: 'model', text: res.response, edit: res.edit}]);
-				if (res.edit) setPendingReview(true);
+			// Add empty message placeholder for streaming response
+			setStreamingMessage('');
+			
+			const stream = await sendMessageStream(text, socket.id, mode!, sessionId || undefined);
+			const reader = stream.getReader();
+			const decoder = new TextDecoder();
+			let currentSessionId = sessionId;
+			let edit = false;
+			let accumulatedMessage = '';
+
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+
+				const decodedText = decoder.decode(value, { stream: true });
+				const lines = decodedText.split('\n');
+
+				for (const line of lines) {
+					if (line.startsWith('data: ')) {
+						const data = line.slice(6);
+						if (data === '[DONE]') continue;
+
+						try {
+							const parsed = JSON.parse(data);
+							
+							if (parsed.session_id) {
+								// First message contains session_id and edit status
+								currentSessionId = parsed.session_id;
+								edit = parsed.edit;
+								if (!sessionId) {
+									setSessionId(currentSessionId);
+								}
+							} else if (parsed.chunk) {
+								// Streaming chunk
+								accumulatedMessage = parsed.chunk;
+								setStreamingMessage(accumulatedMessage);
+							}
+						} catch (e) {
+							// Ignore parsing errors for non-JSON data
+						}
+					}
+				}
 			}
+
+			// Finalize the message
+			setMessages((prev) => [...prev, {role: 'model', text: accumulatedMessage, edit}]);
+			setStreamingMessage('');
+			if (edit) setPendingReview(true);
 		} catch (err: unknown) {
 			const message =
 				err instanceof Error ? err.message : 'Unknown error occurred';
@@ -175,11 +217,19 @@ export default function App() {
 				<SelectInput items={modes} onSelect={m => setMode(m.value)} />
 			)}
 			{(mode) && (
-				<Static items={messages}>
-					{(msg, i) => (
-						<Message key={i} role={msg.role} text={msg.text} edit={msg.edit} />
+				<>
+					<Static items={messages}>
+						{(msg, i) => (
+							<Message key={i} role={msg.role} text={msg.text} edit={msg.edit} />
+						)}
+					</Static>
+					{streamingMessage && (
+						<Message role="model" text={streamingMessage} edit={false} />
 					)}
-				</Static>
+					{isLoading && !streamingMessage && (
+						<Message role="model" text={`Thinking${thinkingDots}`} edit={false} />
+					)}
+				</>
 			)}
 			{(error || connectionError) && (
 				<Box marginTop={1}>
@@ -196,13 +246,18 @@ export default function App() {
 					<Text color="gray">Disconnected from server</Text>
 				</Box>
 			)}
+			{tool && (
+				<Box marginTop={1}>
+					<Text color="gray" dimColor>{tool}</Text>
+				</Box>
+			)}
 			{mode && pendingReview && (
 				<Box flexDirection="column" marginTop={1}>
 					<Text color="yellow" bold>Review changes — accept or reject?</Text>
 					<SelectInput items={reviewChoices} onSelect={handleReviewSelect} />
 				</Box>
 			)}
-			{mode && !pendingReview && (
+			{mode && !pendingReview && !isLoading && (
 				<Box marginTop={1}>
 					<Input onSubmit={handleSubmit} isLoading={isLoading} mode={mode} />
 				</Box>

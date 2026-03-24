@@ -11,6 +11,7 @@ interface SocketContextType {
 	connectionError: string | null;
 	connect: () => void;
 	disconnect: () => void;
+	tool: string | null;
 }
 
 const SocketContext = createContext<SocketContextType | undefined>(undefined);
@@ -28,6 +29,7 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({
 	const [isConnected, setIsConnected] = useState(false);
 	const [isConnecting, setIsConnecting] = useState(false);
 	const [connectionError, setConnectionError] = useState<string | null>(null);
+	const [tool, setTool] = useState<string | null>(null);
 	const { workspace } = useWorkspace();
     const workspaceRef = useRef<string>(workspace);
     useEffect(() => { workspaceRef.current = workspace; }, [workspace]);
@@ -89,6 +91,7 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({
 				payload: { dir_path: string },
 				ack: (result: { ok: boolean; content?: string; error?: string }) => void
 			) => {
+				setTool(`Listing directories: ${payload.dir_path}`)
 				const result = await listDirectory(payload.dir_path, workspaceRef.current);
 				ack(result as { ok: boolean; content?: string; error?: string });
 			}
@@ -100,6 +103,7 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({
 				payload: { file_path: string },
 				ack: (result: { ok: boolean; content?: Uint8Array; error?: string }) => void
 			) => {
+				setTool(`Reading file in bytes: ${payload.file_path}`)
 				const result = await readFileBytes(payload.file_path, workspaceRef.current);
 				ack(result as { ok: boolean; content?: Uint8Array; error?: string });
 			}
@@ -111,6 +115,7 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({
 				payload: { file_path: string },
 				ack: (result: { ok: boolean; content?: string; error?: string }) => void
 			) => {
+				setTool(`Reading file: ${payload.file_path}`)
 				const result = await readFileText(payload.file_path, workspaceRef.current);
 				ack(result as { ok: boolean; content?: string; error?: string });
 			}
@@ -122,6 +127,7 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({
 				payload: { file_path: string; content: string },
 				ack: (result: { ok: boolean; content?: string; error?: string }) => void
 			) => {
+				setTool(`Writing to file: ${payload.file_path}`)
 				const result = await writeFile(payload.file_path, payload.content, workspaceRef.current);
 				ack(result as { ok: boolean; content?: string; error?: string });
 			}
@@ -133,6 +139,7 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({
 				payload: { cmd_parts: string[], timeout: number },
 				ack: (result: { stdout?: string; stderr?: string; return_code?: number }) => void
 			) => {
+				setTool(`Running command: ${payload.cmd_parts}`)
 				const res = await runCommand(payload.cmd_parts, workspaceRef.current, payload.timeout);
 				ack(res)
 			}
@@ -171,6 +178,7 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({
 		connectionError,
 		connect,
 		disconnect,
+		tool, 
 	};
 
 	return (

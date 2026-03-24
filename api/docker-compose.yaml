@@ -1,19 +1,19 @@
 services:
-  app:
-    image: e3ancc/codebase-rag-api:latest
-    ports:
-      - "8000:8000"
-    env_file:
-      - .env
-    environment:
-      MEMGRAPH_HOST: memgraph
-      REDIS_HOST: redis
-      POSTGRES_HOST: postgres
-    depends_on:
-      - memgraph
-      - redis
-      - postgres
-    restart: unless-stopped
+  # app:
+  #   image: e3ancc/codebase-rag-api:latest
+  #   ports:
+  #     - "8000:8000"
+  #   env_file:
+  #     - .env
+  #   environment:
+  #     MEMGRAPH_HOST: memgraph
+  #     REDIS_HOST: redis
+  #     POSTGRES_HOST: postgres
+  #   depends_on:
+  #     - memgraph
+  #     - redis
+  #     - postgres
+  #   restart: unless-stopped
   memgraph:
     image: memgraph/memgraph-mage
     ports:

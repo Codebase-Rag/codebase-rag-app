@@ -21,6 +21,29 @@ export async function sendMessage(
     return res.json();
 }
 
+export async function sendMessageStream(
+    question: string,  
+    socketId: string,
+    mode: string, 
+    sessionId?: string, 
+): Promise<ReadableStream<Uint8Array>> {
+    const res = await fetch(`${process.env['BACKEND_URI']}/remote/repo/query/stream`, {
+        method: "POST", 
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify(
+            {
+                question: question, 
+                socket_id: socketId,
+                mode: mode,  
+                session_id: sessionId,  
+            }
+        )
+    });
+    return res.body!;
+}
+
 export async function rejectChange(
     socketId: string,
     sessionId: string, 

@@ -2,7 +2,7 @@ from codebase_rag.graph_updater import MemgraphIngestor
 from codebase_rag.config import settings
 from rich.console import Console
 from rich.prompt import Confirm
-from typing import Any
+from typing import Any, AsyncGenerator
 from codebase_rag.main import _handle_rejection
 from codebase_rag.graph_updater import MemgraphIngestor
 from models.session import Session
@@ -21,6 +21,8 @@ from sockets.server import sio
 from prompt.agent import agent_instruction
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 import uuid
+import json
+import asyncio
 
 console = Console(width=None, force_terminal=True)
 confirm_edits_globally = True
@@ -102,6 +104,40 @@ def _initialize_services_and_agent(ingestor: MemgraphIngestor, socket_id: str) -
         ]
     )
     return rag_agent
+
+
+async def query_stream(question: str, mode: str, socket_id: str, session_id: str = None) -> AsyncGenerator[str, None]:
+    """Stream query response token by token."""
+    with MemgraphIngestor(
+        host=settings.MEMGRAPH_HOST,
+        port=settings.MEMGRAPH_PORT,
+    ) as ingestor:
+        history = []
+        rag_agent = _initialize_services_and_agent(ingestor, socket_id=socket_id)
+        if session_id == None:
+            session_id = str(uuid.uuid4())
+        else:
+            history = Session.get(session_id)
+        question_with_context = question
+        if mode == 'agent' and len(history) == 0:
+             question_with_context = agent_instruction.format(question=question)
+        
+        # Use stream method for streaming response
+        async with rag_agent.run_stream(question_with_context, message_history=history) as response:
+            # First, yield session_id and edit status as a special message
+            edit = has_edit_tool_calls(response)
+            yield f"data: {json.dumps({'session_id': session_id, 'edit': edit})}\n\n"
+            
+            # Stream the output token by token
+            async for chunk in response.stream():
+                yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+            
+            # Yield end marker
+            yield "data: [DONE]\n\n"
+        
+        # Update session history after streaming completes
+        history.extend(response.new_messages())
+        Session.set(session_id, history)
 
 
 async def query(question: str, mode: str, socket_id: str, session_id: str = None):
