@@ -21,11 +21,7 @@ export default function Input({onSubmit, isLoading, mode}: Props) {
 	};
 
 	if (isLoading) {
-		return (
-			<Box>
-				<Text dimColor>Thinking...</Text>
-			</Box>
-		);
+		return null;
 	}
 
 	return (

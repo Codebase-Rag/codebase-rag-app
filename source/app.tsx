@@ -19,7 +19,7 @@ type MessageItem = {
 
 export default function App() {
 	const {exit} = useApp();
-	const { socket, isConnected, isConnecting, connectionError } = useSocket();
+	const { socket, isConnected, isConnecting, connectionError, tool } = useSocket();
 	const { workspace, setWorkspace } = useWorkspace();
 	const [messages, setMessages] = useState<MessageItem[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
@@ -40,6 +40,21 @@ export default function App() {
 
 	const [showAnimation, setShowAnimation] = useState(true);
 	const [streamingMessage, setStreamingMessage] = useState<string>('');
+	const [thinkingDots, setThinkingDots] = useState<string>('.');
+
+	useEffect(() => {
+		if (!isLoading) return;
+
+		const interval = setInterval(() => {
+			setThinkingDots((prev) => {
+				if (prev === '.') return '..';
+				if (prev === '..') return '...';
+				return '.';
+			});
+		}, 500);
+
+		return () => clearInterval(interval);
+	}, [isLoading]);
 
 	const handleAnimationComplete = useCallback(() => {
 		setShowAnimation(false);
@@ -106,18 +121,6 @@ export default function App() {
 			setMessages([{role: 'model', text: welcomeMessage, edit: false}]);
 			return;
 		}
-
-		// if (text === '/agent') {
-		// 	setMode('agent');
-		// 	setMessages((prev) => [...prev, {role: 'model', text: 'Switched to agent mode'}]);
-		// 	return;
-		// }
-
-		// if (text === '/chat') {
-		// 	setMode('chat');
-		// 	setMessages((prev) => [...prev, {role: 'model', text: 'Switched to chat mode'}]);
-		// 	return;
-		// }
 
 		setMessages((prev) => [...prev, {role: 'user', text, edit: false}]);
 
@@ -223,6 +226,9 @@ export default function App() {
 					{streamingMessage && (
 						<Message role="model" text={streamingMessage} edit={false} />
 					)}
+					{isLoading && !streamingMessage && (
+						<Message role="model" text={`Thinking${thinkingDots}`} edit={false} />
+					)}
 				</>
 			)}
 			{(error || connectionError) && (
@@ -240,13 +246,18 @@ export default function App() {
 					<Text color="gray">Disconnected from server</Text>
 				</Box>
 			)}
+			{tool && (
+				<Box marginTop={1}>
+					<Text color="gray" dimColor>{tool}</Text>
+				</Box>
+			)}
 			{mode && pendingReview && (
 				<Box flexDirection="column" marginTop={1}>
 					<Text color="yellow" bold>Review changes — accept or reject?</Text>
 					<SelectInput items={reviewChoices} onSelect={handleReviewSelect} />
 				</Box>
 			)}
-			{mode && !pendingReview && (
+			{mode && !pendingReview && !isLoading && (
 				<Box marginTop={1}>
 					<Input onSubmit={handleSubmit} isLoading={isLoading} mode={mode} />
 				</Box>
