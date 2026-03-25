@@ -8,15 +8,36 @@ from fastapi.middleware.cors import CORSMiddleware
 from sockets.server import sio
 import socketio
 import uvicorn
+import logging
 
 from sockets.server import sio
 from core.database import init_db
+from services.session_sync_worker import get_worker
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
 @app.on_event("startup")
-def on_startup():
+async def on_startup():
+	"""Initialize database and start background sync worker."""
 	init_db()
+	
+	# Start background session sync worker
+	# Syncs Redis sessions to PostgreSQL every 300 seconds (5 minutes)
+	# Adjust the sync_interval parameter as needed for your use case
+	worker = get_worker(sync_interval=300)
+	await worker.start()
+	
+	logger.info("Application startup complete - sync worker started")
+
+@app.on_event("shutdown")
+async def on_shutdown():
+	"""Stop background sync worker and perform final sync."""
+	worker = get_worker()
+	if worker.is_running():
+		await worker.stop()
+	logger.info("Application shutdown complete")
 
 @app.get("/")
 async def root():
@@ -47,3 +68,4 @@ if __name__ == "__main__":
 #     from codebase_rag.main import app
 
 #     app()
+
