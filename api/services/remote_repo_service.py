@@ -136,6 +136,7 @@ async def query_stream(question: str, mode: str, socket_id: str, session_id: str
             yield "data: [DONE]\n\n"
         
         # Update session history after streaming completes
+        print(history)
         history.extend(response.new_messages())
         Session.set(session_id, history)
 
