@@ -1,5 +1,5 @@
 from codebase_rag.graph_updater import GraphUpdater, MemgraphIngestor
-from codebase_rag.config import settings
+from core.config import settings
 from codebase_rag.parser_loader import load_parsers
 from pathlib import Path
 from rich.console import Console

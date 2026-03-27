@@ -1,6 +1,6 @@
 import redis
 from typing import Any
-from codebase_rag.config import settings
+from core.config import settings
 
 redis_client = redis.Redis(
     host=settings.REDIS_HOST,

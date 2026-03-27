@@ -5,7 +5,7 @@ from typing import Any
 
 from loguru import logger
 
-from ..config import IGNORE_PATTERNS
+from core.config import IGNORE_PATTERNS
 from ..services.graph_service import MemgraphIngestor
 
 

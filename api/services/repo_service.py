@@ -1,7 +1,7 @@
 from codebase_rag.main import run_with_cancellation, _initialize_services_and_agent, _setup_common_initialization, init_session_log, log_session_event, get_session_context, _handle_rejection
 from services.remote_repo_service import has_edit_tool_calls
 from codebase_rag.graph_updater import MemgraphIngestor
-from codebase_rag.config import settings
+from core.config import settings
 from rich.console import Console
 from rich.prompt import Confirm
 from typing import Any

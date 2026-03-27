@@ -9,7 +9,7 @@ from google.genai.errors import ClientError
 from loguru import logger
 from pydantic_ai import Tool
 
-from ..config import settings
+from core.config import settings
 
 
 class _NotSupportedClient:

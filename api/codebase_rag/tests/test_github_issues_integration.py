@@ -6,7 +6,7 @@ These tests ensure that the real-world problems reported by users are actually f
 import os
 from unittest.mock import patch
 
-from codebase_rag.config import AppConfig
+from core.config import AppConfig
 
 
 class TestGitHubIssuesIntegration:

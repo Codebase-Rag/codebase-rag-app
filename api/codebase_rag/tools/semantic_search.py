@@ -32,7 +32,7 @@ def semantic_code_search(query: str, top_k: int = 5) -> list[dict[str, Any]]:
         from ..embedder import embed_code
         from ..vector_store import search_embeddings
         from ..services.graph_service import MemgraphIngestor
-        from ..config import settings
+        from core.config import settings
         
         # Generate embedding for the query
         query_embedding = embed_code(query)
@@ -102,7 +102,7 @@ def get_function_source_code(node_id: int) -> str | None:
     """
     try:
         from ..services.graph_service import MemgraphIngestor
-        from ..config import settings
+        from core.config import settings
         from ..utils.source_extraction import extract_source_lines, validate_source_location
         
         with MemgraphIngestor(

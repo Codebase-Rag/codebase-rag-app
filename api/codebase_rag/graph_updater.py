@@ -7,7 +7,7 @@ from typing import Any
 from loguru import logger
 from tree_sitter import Node, Parser
 
-from .config import IGNORE_PATTERNS
+from core.config import IGNORE_PATTERNS
 from .language_config import get_language_config, LANGUAGE_FQN_CONFIGS
 from .parsers.factory import ProcessorFactory
 from .services.graph_service import MemgraphIngestor

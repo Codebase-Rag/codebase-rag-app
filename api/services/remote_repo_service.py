@@ -1,5 +1,5 @@
 from codebase_rag.graph_updater import MemgraphIngestor
-from codebase_rag.config import settings
+from core.config import settings
 from rich.console import Console
 from rich.prompt import Confirm
 from typing import Any, AsyncGenerator

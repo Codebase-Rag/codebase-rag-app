@@ -1,7 +1,7 @@
 from loguru import logger
 from pydantic_ai import Agent, Tool
 
-from ..config import settings
+from core.config import settings
 from ..prompts import (
     CYPHER_SYSTEM_PROMPT,
     LOCAL_CYPHER_SYSTEM_PROMPT,
