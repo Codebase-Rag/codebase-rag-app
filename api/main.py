@@ -10,7 +10,7 @@ import socketio
 import uvicorn
 
 from sockets.server import sio
-from core.database import init_db
+from core.db.database import init_db
 
 app = FastAPI()
 

@@ -3,8 +3,8 @@ from typing import Any
 
 from sqlalchemy import Column, String, DateTime, Text, func
 from pydantic_ai.messages import ModelMessagesTypeAdapter
-from core.redis import redis_client
-from core.database import SessionLocal, Base
+from core.db.database import redis_client
+from core.db.database import SessionLocal, Base
 
 
 class Session(Base):
