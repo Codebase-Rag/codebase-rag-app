@@ -5,6 +5,8 @@ from rich.prompt import Confirm
 from typing import Any, AsyncGenerator
 from codebase_rag.main import _handle_rejection
 from codebase_rag.graph_updater import MemgraphIngestor
+from codebase_rag.remote_graph_updater import RemoteGraphUpdater
+from codebase_rag.filesystem import UploadedFilesystem
 from models.session import Session
 from codebase_rag.tools.codebase_query import create_query_tool
 from codebase_rag.services.llm import CypherGenerator, create_rag_orchestrator
@@ -20,6 +22,7 @@ from codebase_rag.services.llm import CypherGenerator, create_rag_orchestrator
 from sockets.server import sio
 from prompt.agent import agent_instruction
 from pydantic_ai.messages import ModelResponse, ToolCallPart
+from loguru import logger
 import uuid
 import json
 import asyncio
@@ -170,4 +173,37 @@ async def discard_changes(socket_id: str, session_id: str):
         history = Session.get(session_id)
         await _handle_rejection(rag_agent, history, console)
         Session.set(session_id, history)
+
+
+async def ingest_uploaded(project_name: str, files: list[dict]) -> None:
+    """
+    Ingest uploaded project files into the knowledge graph.
+    
+    This processes files that were directly uploaded via HTTP POST,
+    rather than fetched via socket callbacks.
+    
+    Args:
+        project_name: Name for the project in the graph
+        files: List of file dicts with path, name, is_dir, is_file, content, etc.
+        
+    Raises:
+        RuntimeError: If ingestion fails
+    """
+    logger.info(f"Starting ingestion for project '{project_name}' with {len(files)} files")
+    
+    with MemgraphIngestor(
+        host=settings.MEMGRAPH_HOST,
+        port=settings.MEMGRAPH_PORT,
+    ) as ingestor:
+        logger.info("Connected to Memgraph")
+        ingestor.ensure_constraints()
+        
+        # Create filesystem from uploaded data
+        filesystem = UploadedFilesystem(project_name=project_name, files=files)
+        
+        # Run the graph updater
+        updater = RemoteGraphUpdater(ingestor=ingestor, filesystem=filesystem)
+        await updater.run()
+        
+        logger.info(f"Ingestion complete for project '{project_name}'")
 

@@ -10,6 +10,8 @@ import { useSocket } from './contexts/SocketContext.js';
 import { getWorkspaceInfo } from './utils/workspace.js';
 import { useWorkspace } from './contexts/WorkspaceContext.js';
 import SelectInput from 'ink-select-input';
+import { sendProjectFiles } from './api/graph.js';
+
 
 type MessageItem = {
 	role: 'user' | 'model';
@@ -23,6 +25,7 @@ export default function App() {
 	const { workspace, setWorkspace } = useWorkspace();
 	const [messages, setMessages] = useState<MessageItem[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
+	const [uploading, setUploading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [sessionId, setSessionId] = useState<string | null>(null);
 	const [mode, setMode] = useState<string | null>(null);
@@ -128,8 +131,11 @@ export default function App() {
 			try {
 				const info = await getWorkspaceInfo(text);
 				if(info.exists && info.isDirectory) {
-					setWorkspace(info.absolutePath)
+					setWorkspace(info.absolutePath);
 					setMessages((prev) => [...prev, {role: 'model', text: `Workspace is set to: ${info.absolutePath}`, edit: false}]);
+					setUploading(true);
+					await sendProjectFiles(info.absolutePath);
+					setUploading(false);
 				} else if (info.exists) {
 					setMessages((prev) => [...prev, {role: 'model', text: 'Path exists but is not a directory. Please enter a valid directory path.', edit: false}]);
 				} else {
@@ -244,6 +250,11 @@ export default function App() {
 			{!isConnected && !isConnecting && !connectionError && (
 				<Box marginTop={1}>
 					<Text color="gray">Disconnected from server</Text>
+				</Box>
+			)}
+			{uploading && (
+				<Box marginTop={1}>
+					<Text color="yellow">Uploading files...</Text>
 				</Box>
 			)}
 			{tool && (

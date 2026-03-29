@@ -1,15 +1,32 @@
 from fastapi import APIRouter, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from fastapi.responses import JSONResponse, StreamingResponse
-from services.remote_repo_service import query, query_stream, discard_changes
+from services.remote_repo_service import query, query_stream, discard_changes, ingest_uploaded
 from typing import Optional
-from typing import Any
+import base64
 
 class QueryRequest(BaseModel):
     question: str
     socket_id: str
     mode: str
     session_id: Optional[str] = None
+
+
+class FileUpload(BaseModel):
+    """A single file or directory in the upload."""
+    path: str  # Relative path from project root
+    name: str  # File/directory name
+    is_dir: bool = False
+    is_file: bool = True
+    content: Optional[str] = None  # Base64 encoded content (None for directories)
+    extension: str = ""
+    size: int = 0
+
+
+class IngestRequest(BaseModel):
+    """Request to ingest a project with all files included."""
+    project_name: str
+    files: list[FileUpload]
 
     
 
@@ -36,4 +53,58 @@ async def query_repo_stream(request: QueryRequest):
 @router.delete("/remote/repo/reject/sessions/{session_id}", status_code=status.HTTP_200_OK)
 async def reject(socket_id: str, session_id: str):
     await discard_changes(socket_id, session_id)
-    return JSONResponse(content={"response": 'Changes have been discarded!!!'}, status_code=status.HTTP_200_OK) 
+    return JSONResponse(content={"response": 'Changes have been discarded!!!'}, status_code=status.HTTP_200_OK)
+
+
+@router.post("/remote/repo/ingest", status_code=status.HTTP_200_OK)
+async def ingest_repo(request: IngestRequest):
+    """
+    Ingest a project into the knowledge graph.
+    
+    The frontend sends all project files directly in the request body.
+    File contents should be base64 encoded.
+    
+    Example request:
+    ```json
+    {
+        "project_name": "my-project",
+        "files": [
+            {"path": "src", "name": "src", "is_dir": true, "is_file": false},
+            {"path": "src/main.py", "name": "main.py", "is_dir": false, "is_file": true, 
+             "content": "ZGVmIG1haW4oKToKICAgIHByaW50KCJIZWxsbyIp", "extension": ".py", "size": 28}
+        ]
+    }
+    ```
+    
+    Returns:
+        JSON response with status and any errors
+    """
+    try:
+        # Decode base64 content for each file
+        files_data = []
+        for f in request.files:
+            file_dict = {
+                "path": f.path,
+                "name": f.name,
+                "is_dir": f.is_dir,
+                "is_file": f.is_file,
+                "extension": f.extension,
+                "size": f.size,
+                "content": base64.b64decode(f.content) if f.content else None,
+            }
+            files_data.append(file_dict)
+        
+        await ingest_uploaded(project_name=request.project_name, files=files_data)
+        return JSONResponse(
+            content={
+                "status": "success",
+                "message": f"Successfully ingested project: {request.project_name}",
+                "files_processed": len(files_data),
+            },
+            status_code=status.HTTP_200_OK
+        )
+    except Exception as e:
+        return JSONResponse(
+            content={"status": "error", "message": str(e)},
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
