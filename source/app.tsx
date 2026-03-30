@@ -130,11 +130,11 @@ export default function App() {
 		if(workspace == process.cwd()) {
 			try {
 				const info = await getWorkspaceInfo(text);
-				if(info.exists && info.isDirectory) {
+				if(info.exists && info.isDirectory && socket && socket.id) {
 					setWorkspace(info.absolutePath);
 					setMessages((prev) => [...prev, {role: 'model', text: `Workspace is set to: ${info.absolutePath}`, edit: false}]);
 					setUploading(true);
-					await sendProjectFiles(info.absolutePath);
+					await sendProjectFiles(socket.id, info.absolutePath);
 					setUploading(false);
 				} else if (info.exists) {
 					setMessages((prev) => [...prev, {role: 'model', text: 'Path exists but is not a directory. Please enter a valid directory path.', edit: false}]);

@@ -26,9 +26,9 @@ class FileUpload(BaseModel):
 class IngestRequest(BaseModel):
     """Request to ingest a project with all files included."""
     project_name: str
+    socket_id: str
     files: list[FileUpload]
 
-    
 
 router = APIRouter()
 
@@ -63,24 +63,8 @@ async def ingest_repo(request: IngestRequest):
     
     The frontend sends all project files directly in the request body.
     File contents should be base64 encoded.
-    
-    Example request:
-    ```json
-    {
-        "project_name": "my-project",
-        "files": [
-            {"path": "src", "name": "src", "is_dir": true, "is_file": false},
-            {"path": "src/main.py", "name": "main.py", "is_dir": false, "is_file": true, 
-             "content": "ZGVmIG1haW4oKToKICAgIHByaW50KCJIZWxsbyIp", "extension": ".py", "size": 28}
-        ]
-    }
-    ```
-    
-    Returns:
-        JSON response with status and any errors
     """
     try:
-        # Decode base64 content for each file
         files_data = []
         for f in request.files:
             file_dict = {
@@ -94,7 +78,11 @@ async def ingest_repo(request: IngestRequest):
             }
             files_data.append(file_dict)
         
-        await ingest_uploaded(project_name=request.project_name, files=files_data)
+        await ingest_uploaded(
+            project_name=request.project_name, 
+            socket_id=request.socket_id,
+            files=files_data
+        )
         return JSONResponse(
             content={
                 "status": "success",

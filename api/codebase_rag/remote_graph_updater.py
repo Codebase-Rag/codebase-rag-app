@@ -1,18 +1,22 @@
 """
-Remote Graph Updater - Graph ingestion with filesystem abstraction.
+Remote Graph Updater - Graph ingestion with socket.io file access.
 
-This module provides graph ingestion that works with remote filesystems
-by using the FilesystemInterface abstraction instead of direct pathlib calls.
+This module provides graph ingestion that fetches files from a remote
+frontend client via socket.io, enabling code analysis of projects that
+exist on the client machine rather than the server.
 """
 
 from collections import OrderedDict, defaultdict
 from pathlib import Path
 from typing import Any
+import json
+import re
 
 from loguru import logger
-from tree_sitter import Node, Parser
+from tree_sitter import Node, Parser, QueryCursor
 
 from core.config import IGNORE_PATTERNS
+from sockets.server import sio
 
 from .filesystem import (
     DirectoryTree,
@@ -21,7 +25,6 @@ from .filesystem import (
 )
 from .language_config import get_language_config, LANGUAGE_FQN_CONFIGS
 from .parser_loader import load_parsers
-from .parsers.factory import ProcessorFactory
 from .services.graph_service import MemgraphIngestor
 from .utils.dependencies import has_semantic_dependencies
 
@@ -91,6 +94,9 @@ class RemoteBoundedASTCache:
 
     def __contains__(self, key: str) -> bool:
         return key in self.cache
+    
+    def get(self, key: str) -> tuple[Node, str] | None:
+        return self.cache.get(key)
 
     def items(self):
         return self.cache.items()
@@ -98,25 +104,27 @@ class RemoteBoundedASTCache:
 
 class RemoteGraphUpdater:
     """
-    Graph updater that works with remote filesystems.
+    Graph updater that works with uploaded file data.
     
-    Unlike the standard GraphUpdater which uses pathlib directly, this
-    implementation uses the FilesystemInterface abstraction to fetch
-    files over the network.
+    Uses FilesystemInterface (typically UploadedFilesystem) for directory
+    tree and file content during parsing. Uses socket.io to read files
+    on-demand during embedding generation (since files are already uploaded
+    but we need to re-read for source extraction).
     
     The ingestion process:
-    1. Fetch directory tree from remote client
+    1. Get directory tree from uploaded data
     2. Identify packages and folders from tree metadata
-    3. Batch-fetch source files for parsing
-    4. Parse ASTs and extract definitions
+    3. Parse source files from uploaded content
+    4. Extract definitions and build graph
     5. Process function calls
-    6. Generate embeddings (optional)
+    6. Generate embeddings (reads files via socket.io)
     """
 
     def __init__(
         self,
         ingestor: MemgraphIngestor,
         filesystem: FilesystemInterface,
+        socket_id: str,
         parsers: dict[str, Parser] | None = None,
         queries: dict[str, Any] | None = None,
     ):
@@ -126,11 +134,13 @@ class RemoteGraphUpdater:
         Args:
             ingestor: Memgraph database connection
             filesystem: Filesystem interface (local or remote)
+            socket_id: Socket.io connection ID for reading files from frontend
             parsers: Pre-loaded Tree-sitter parsers (loaded if not provided)
             queries: Pre-loaded queries (loaded if not provided)
         """
         self.ingestor = ingestor
         self.filesystem = filesystem
+        self.socket_id = socket_id
         self.project_name = filesystem.project_name
         
         # Load parsers and queries if not provided
@@ -151,8 +161,45 @@ class RemoteGraphUpdater:
         self.structural_elements: dict[str, str | None] = {}
         self.ignore_dirs = IGNORE_PATTERNS
         
+        # Track class inheritance for method override processing
+        self.class_inheritance: dict[str, list[str]] = {}
+        
         # Cache the directory tree
         self._tree: DirectoryTree | None = None
+        
+        # Binary file extensions to skip
+        self._binary_extensions = {
+            ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp",
+            ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+            ".zip", ".tar", ".gz", ".rar", ".7z",
+            ".exe", ".dll", ".so", ".dylib",
+            ".mp3", ".mp4", ".wav", ".avi", ".mov",
+            ".pyc", ".pyo", ".class", ".o", ".obj",
+        }
+
+    async def _read_file(self, file_path: str) -> bytes | None:
+        """Read file content from frontend via socket.io."""
+        if Path(file_path).suffix.lower() in self._binary_extensions:
+            logger.debug(f"Skipping binary file: {file_path}")
+            return None
+        
+        try:
+            result = await sio.call(
+                "file:read",
+                {"file_path": file_path},
+                to=self.socket_id,
+            )
+            
+            if not result.get("ok"):
+                logger.warning(f"Failed to read {file_path}: {result.get('error')}")
+                return None
+            
+            content = result.get("content", "")
+            return content.encode("utf-8")
+            
+        except Exception as e:
+            logger.warning(f"Error reading {file_path}: {e}")
+            return None
 
     def _prepare_queries_with_parsers(
         self, queries: dict[str, Any], parsers: dict[str, Parser]
@@ -348,11 +395,11 @@ class RemoteGraphUpdater:
             else:
                 generic_files.append(f)
         
-        # Batch fetch and process source files by language
+        # Process source files by language (use uploaded file data)
         for lang_name, files in files_by_lang.items():
             logger.info(f"  Processing {len(files)} {lang_name} files")
             
-            # Batch fetch file contents
+            # Batch fetch file contents from uploaded filesystem
             paths = [f.path for f in files]
             batch_result = await self.filesystem.read_files_batch(paths)
             
@@ -437,7 +484,7 @@ class RemoteGraphUpdater:
             
             self.ingestor.ensure_relationship_batch(
                 (parent_label, parent_key, parent_val),
-                "CONTAINED_IN",
+                "CONTAINS_MODULE",
                 ("Module", "qualified_name", module_qn),
             )
             
@@ -462,46 +509,55 @@ class RemoteGraphUpdater:
         lang_queries: dict[str, Any],
     ) -> None:
         """Extract function, class, and method definitions from AST."""
-        # Get queries
-        function_query = lang_queries.get("function")
-        class_query = lang_queries.get("class")
+        # Get queries - note: keys are "functions" and "classes" (plural)
+        function_query = lang_queries.get("functions")
+        class_query = lang_queries.get("classes")
         
         if not function_query and not class_query:
+            logger.debug(f"No function/class queries for {language}")
             return
         
-        # Extract functions
+        # Extract functions using QueryCursor
         if function_query:
-            for match in function_query.matches(root_node):
-                for capture in match[1]:
-                    node = capture[0]
-                    func_name = self._get_node_name(node, source_bytes, language)
-                    if func_name:
-                        func_qn = f"{module_qn}.{func_name}"
-                        self.function_registry[func_qn] = "Function"
-                        self.simple_name_lookup[func_name].add(func_qn)
-                        
-                        self.ingestor.ensure_node_batch(
-                            "Function",
-                            {
-                                "qualified_name": func_qn,
-                                "name": func_name,
-                                "start_line": node.start_point[0] + 1,
-                                "end_line": node.end_point[0] + 1,
-                            },
-                        )
-                        self.ingestor.ensure_relationship_batch(
-                            ("Module", "qualified_name", module_qn),
-                            "DEFINES",
-                            ("Function", "qualified_name", func_qn),
-                        )
+            cursor = QueryCursor(function_query)
+            captures = cursor.captures(root_node)
+            func_nodes = captures.get("function", [])
+            
+            for node in func_nodes:
+                if not isinstance(node, Node):
+                    continue
+                func_name = self._get_node_name(node, source_bytes, language)
+                if func_name:
+                    func_qn = f"{module_qn}.{func_name}"
+                    self.function_registry[func_qn] = "Function"
+                    self.simple_name_lookup[func_name].add(func_qn)
+                    
+                    self.ingestor.ensure_node_batch(
+                        "Function",
+                        {
+                            "qualified_name": func_qn,
+                            "name": func_name,
+                            "start_line": node.start_point[0] + 1,
+                            "end_line": node.end_point[0] + 1,
+                        },
+                    )
+                    self.ingestor.ensure_relationship_batch(
+                        ("Module", "qualified_name", module_qn),
+                        "DEFINES",
+                        ("Function", "qualified_name", func_qn),
+                    )
         
         # Extract classes and their methods
         if class_query:
-            for match in class_query.matches(root_node):
-                for capture in match[1]:
-                    node = capture[0]
-                    class_name = self._get_node_name(node, source_bytes, language)
-                    if class_name:
+            cursor = QueryCursor(class_query)
+            captures = cursor.captures(root_node)
+            class_nodes = captures.get("class", [])
+            
+            for node in class_nodes:
+                if not isinstance(node, Node):
+                    continue
+                class_name = self._get_node_name(node, source_bytes, language)
+                if class_name:
                         class_qn = f"{module_qn}.{class_name}"
                         self.function_registry[class_qn] = "Class"
                         self.simple_name_lookup[class_name].add(class_qn)
@@ -535,37 +591,46 @@ class RemoteGraphUpdater:
         lang_queries: dict[str, Any],
     ) -> None:
         """Extract methods from a class node."""
-        function_query = lang_queries.get("function")
+        function_query = lang_queries.get("functions")  # plural
         if not function_query:
             return
         
-        for match in function_query.matches(class_node):
-            for capture in match[1]:
-                node = capture[0]
-                method_name = self._get_node_name(node, source_bytes, language)
-                if method_name:
-                    method_qn = f"{class_qn}.{method_name}"
-                    self.function_registry[method_qn] = "Method"
-                    self.simple_name_lookup[method_name].add(method_qn)
-                    
-                    self.ingestor.ensure_node_batch(
-                        "Method",
-                        {
-                            "qualified_name": method_qn,
-                            "name": method_name,
-                            "start_line": node.start_point[0] + 1,
-                            "end_line": node.end_point[0] + 1,
-                        },
-                    )
-                    self.ingestor.ensure_relationship_batch(
-                        ("Class", "qualified_name", class_qn),
-                        "CONTAINS",
-                        ("Method", "qualified_name", method_qn),
-                    )
+        cursor = QueryCursor(function_query)
+        captures = cursor.captures(class_node)
+        method_nodes = captures.get("function", [])
+        
+        for node in method_nodes:
+            if not isinstance(node, Node):
+                continue
+            method_name = self._get_node_name(node, source_bytes, language)
+            if method_name:
+                method_qn = f"{class_qn}.{method_name}"
+                self.function_registry[method_qn] = "Method"
+                self.simple_name_lookup[method_name].add(method_qn)
+                
+                self.ingestor.ensure_node_batch(
+                    "Method",
+                    {
+                        "qualified_name": method_qn,
+                        "name": method_name,
+                        "start_line": node.start_point[0] + 1,
+                        "end_line": node.end_point[0] + 1,
+                    },
+                )
+                self.ingestor.ensure_relationship_batch(
+                    ("Class", "qualified_name", class_qn),
+                    "CONTAINS",
+                    ("Method", "qualified_name", method_qn),
+                )
 
     def _get_node_name(self, node: Node, source_bytes: bytes, language: str) -> str | None:
         """Extract the name from an AST node."""
-        # Look for name/identifier child
+        # Try the 'name' field first (most reliable for functions/classes)
+        name_node = node.child_by_field_name("name")
+        if name_node and name_node.text:
+            return name_node.text.decode("utf-8")
+        
+        # Fallback: Look for identifier child
         for child in node.children:
             if child.type in ("identifier", "name", "property_identifier"):
                 return source_bytes[child.start_byte:child.end_byte].decode("utf-8")
@@ -573,9 +638,139 @@ class RemoteGraphUpdater:
 
     def _process_dependency_file(self, file_info: FileInfo, content: bytes) -> None:
         """Process a dependency file (pyproject.toml, package.json, etc.)."""
-        # TODO: Implement dependency extraction
-        # For now, just log that we found it
-        logger.debug(f"Found dependency file: {file_info.path}")
+        file_name = file_info.name.lower()
+        logger.info(f"  Parsing dependency file: {file_info.path}")
+
+        try:
+            content_str = content.decode("utf-8")
+            
+            if file_name == "pyproject.toml":
+                self._parse_pyproject_toml(content_str)
+            elif file_name == "requirements.txt":
+                self._parse_requirements_txt(content_str)
+            elif file_name == "package.json":
+                self._parse_package_json(content_str)
+            elif file_name == "cargo.toml":
+                self._parse_cargo_toml(content_str)
+            elif file_name == "go.mod":
+                self._parse_go_mod(content_str)
+            else:
+                logger.debug(f"    Unknown dependency file format: {file_info.path}")
+        except Exception as e:
+            logger.error(f"    Error parsing {file_info.path}: {e}")
+
+    def _add_dependency(self, name: str, version_spec: str = "") -> None:
+        """Add an external package dependency to the graph."""
+        self.ingestor.ensure_node_batch(
+            "ExternalPackage",
+            {
+                "name": name,
+                "version_spec": version_spec,
+            },
+        )
+        self.ingestor.ensure_relationship_batch(
+            ("Project", "name", self.project_name),
+            "DEPENDS_ON",
+            ("ExternalPackage", "name", name),
+        )
+
+    def _parse_pyproject_toml(self, content: str) -> None:
+        """Parse pyproject.toml for Python dependencies."""
+        try:
+            import toml
+            data = toml.loads(content)
+        except ImportError:
+            logger.warning("toml package not installed, skipping pyproject.toml parsing")
+            return
+
+        # Handle Poetry dependencies
+        poetry_deps = data.get("tool", {}).get("poetry", {}).get("dependencies", {})
+        if poetry_deps:
+            for dep_name, dep_spec in poetry_deps.items():
+                if dep_name.lower() == "python":
+                    continue
+                self._add_dependency(dep_name, str(dep_spec))
+
+        # Handle PEP 621 project dependencies
+        project_deps = data.get("project", {}).get("dependencies", [])
+        if project_deps:
+            for dep_line in project_deps:
+                dep_name = self._extract_pep508_package_name(dep_line)
+                if dep_name:
+                    self._add_dependency(dep_name, dep_line)
+
+        # Handle optional dependencies
+        optional_deps = data.get("project", {}).get("optional-dependencies", {})
+        for group_name, deps in optional_deps.items():
+            for dep_line in deps:
+                dep_name = self._extract_pep508_package_name(dep_line)
+                if dep_name:
+                    self._add_dependency(dep_name, dep_line)
+
+    def _extract_pep508_package_name(self, dep_string: str) -> str:
+        """Extracts the package name from a PEP 508 string."""
+        match = re.match(r"^([a-zA-Z0-9_.-]+)", dep_string.strip())
+        if match:
+            return match.group(1)
+        return ""
+
+    def _parse_requirements_txt(self, content: str) -> None:
+        """Parse requirements.txt for Python dependencies."""
+        for line in content.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or line.startswith("-"):
+                continue
+            dep_name = self._extract_pep508_package_name(line)
+            if dep_name:
+                self._add_dependency(dep_name, line)
+
+    def _parse_package_json(self, content: str) -> None:
+        """Parse package.json for JavaScript/Node dependencies."""
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse package.json: {e}")
+            return
+
+        for dep_type in ["dependencies", "devDependencies", "peerDependencies"]:
+            deps = data.get(dep_type, {})
+            for dep_name, dep_version in deps.items():
+                self._add_dependency(dep_name, dep_version)
+
+    def _parse_cargo_toml(self, content: str) -> None:
+        """Parse Cargo.toml for Rust dependencies."""
+        try:
+            import toml
+            data = toml.loads(content)
+        except ImportError:
+            logger.warning("toml package not installed, skipping Cargo.toml parsing")
+            return
+
+        for dep_type in ["dependencies", "dev-dependencies", "build-dependencies"]:
+            deps = data.get(dep_type, {})
+            for dep_name, dep_spec in deps.items():
+                version = dep_spec if isinstance(dep_spec, str) else dep_spec.get("version", "")
+                self._add_dependency(dep_name, version)
+
+    def _parse_go_mod(self, content: str) -> None:
+        """Parse go.mod for Go dependencies."""
+        in_require = False
+        for line in content.splitlines():
+            line = line.strip()
+            if line.startswith("require ("):
+                in_require = True
+                continue
+            if in_require:
+                if line == ")":
+                    in_require = False
+                    continue
+                parts = line.split()
+                if len(parts) >= 2:
+                    self._add_dependency(parts[0], parts[1])
+            elif line.startswith("require "):
+                parts = line[8:].split()
+                if len(parts) >= 2:
+                    self._add_dependency(parts[0], parts[1])
 
     def _process_generic_file(self, file_info: FileInfo) -> None:
         """Create File node and relationship for any file."""
@@ -605,26 +800,120 @@ class RemoteGraphUpdater:
         )
 
     def _process_function_calls(self) -> None:
-        """Pass 3: Process function calls from cached ASTs."""
+        """Pass 3: Process function calls from cached ASTs.
+        
+        Note: This is a simplified version that logs call processing.
+        Full call resolution requires complex type inference and import
+        resolution which is not yet implemented for remote ingestion.
+        """
+        call_count = 0
         for file_path, (root_node, language) in list(self.ast_cache.items()):
             lang_queries = self.queries.get(language)
             if not lang_queries:
                 continue
             
-            call_query = lang_queries.get("call")
+            call_query = lang_queries.get("calls")  # plural
             if not call_query:
                 continue
             
-            # Note: Full call resolution requires more context
-            # This is a simplified version
-            logger.debug(f"Processing calls in {file_path}")
+            # Count calls using QueryCursor
+            cursor = QueryCursor(call_query)
+            captures = cursor.captures(root_node)
+            call_nodes = captures.get("call", [])
+            call_count += len(call_nodes)
+            
+            logger.debug(f"Found {len(call_nodes)} calls in {file_path}")
+        
+        logger.info(f"  Found {call_count} function calls (call resolution not yet implemented)")
 
     async def _generate_semantic_embeddings(self) -> None:
-        """Pass 4: Generate semantic embeddings for functions/methods."""
+        """Generate and store semantic embeddings for functions and methods."""
         if not has_semantic_dependencies():
-            logger.info("Semantic dependencies not available, skipping embeddings")
+            logger.info("Semantic search dependencies not available, skipping embedding generation")
             return
+            
+        try:
+            from .embedder import embed_code
+            from .vector_store import store_embedding
+            
+            logger.info("--- Pass 4: Generating semantic embeddings ---")
+            
+            # Query database for all Function and Method nodes with their source info
+            # Functions are directly defined by Modules
+            # Methods are contained in Classes which are defined by Modules
+            query = """
+            MATCH (m:Module)-[:DEFINES]->(n:Function)
+            RETURN id(n) AS node_id, n.qualified_name AS qualified_name, 
+                   n.start_line AS start_line, n.end_line AS end_line, 
+                   m.path AS path
+            UNION
+            MATCH (m:Module)-[:DEFINES]->(c:Class)-[:CONTAINS]->(n:Method)
+            RETURN id(n) AS node_id, n.qualified_name AS qualified_name, 
+                   n.start_line AS start_line, n.end_line AS end_line, 
+                   m.path AS path
+            ORDER BY qualified_name
+            """
+            
+            results = self.ingestor._execute_query(query)
+            
+            if not results:
+                logger.info("No functions or methods found for embedding generation")
+                return
+                
+            logger.info(f"Generating embeddings for {len(results)} functions/methods")
+            
+            embedded_count = 0
+            for result in results:
+                node_id = result["node_id"]
+                qualified_name = result["qualified_name"]
+                start_line = result.get("start_line")
+                end_line = result.get("end_line")
+                file_path = result.get("path")
+                
+                # Extract source code by reading file from frontend
+                source_code = await self._extract_source_code(
+                    qualified_name, file_path, start_line, end_line
+                )
+                
+                if source_code:
+                    try:
+                        embedding = embed_code(source_code)
+                        store_embedding(node_id, embedding, qualified_name)
+                        embedded_count += 1
+                        
+                        if embedded_count % 10 == 0:
+                            logger.debug(f"Generated {embedded_count}/{len(results)} embeddings")
+                            
+                    except Exception as e:
+                        logger.warning(f"Failed to embed {qualified_name}: {e}")
+                else:
+                    logger.debug(f"No source code found for {qualified_name}")
+                    
+            logger.info(f"Successfully generated {embedded_count} semantic embeddings")
+            
+        except Exception as e:
+            logger.warning(f"Failed to generate semantic embeddings: {e}")
+    
+    async def _extract_source_code(self, qualified_name: str, file_path: str, start_line: int, end_line: int) -> str | None:
+        """Extract source code for a function/method by reading from frontend."""
+        if not file_path or not start_line or not end_line:
+            return None
+
+        # Read file content via socket.io
+        content = await self._read_file(file_path)
+        if content is None:
+            logger.debug(f"Could not read file for source extraction: {file_path}")
+            return None
         
-        # TODO: Implement semantic embedding generation
-        # Would need to query the database and generate embeddings
-        logger.info("Semantic embedding generation not yet implemented for remote")
+        try:
+            # Decode and extract lines
+            text = content.decode("utf-8")
+            lines = text.splitlines(keepends=True)
+            
+            # Extract the relevant lines (1-indexed to 0-indexed)
+            snippet_lines = lines[start_line - 1 : end_line]
+            return "".join(snippet_lines)
+        except Exception as e:
+            logger.debug(f"Failed to extract source from {file_path}: {e}")
+            return None
+    

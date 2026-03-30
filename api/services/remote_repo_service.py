@@ -175,19 +175,14 @@ async def discard_changes(socket_id: str, session_id: str):
         Session.set(session_id, history)
 
 
-async def ingest_uploaded(project_name: str, files: list[dict]) -> None:
+async def ingest_uploaded(project_name: str, socket_id: str, files: list[dict]) -> None:
     """
     Ingest uploaded project files into the knowledge graph.
     
-    This processes files that were directly uploaded via HTTP POST,
-    rather than fetched via socket callbacks.
-    
     Args:
         project_name: Name for the project in the graph
+        socket_id: Socket.io connection ID for reading files during embedding
         files: List of file dicts with path, name, is_dir, is_file, content, etc.
-        
-    Raises:
-        RuntimeError: If ingestion fails
     """
     logger.info(f"Starting ingestion for project '{project_name}' with {len(files)} files")
     
@@ -201,8 +196,12 @@ async def ingest_uploaded(project_name: str, files: list[dict]) -> None:
         # Create filesystem from uploaded data
         filesystem = UploadedFilesystem(project_name=project_name, files=files)
         
-        # Run the graph updater
-        updater = RemoteGraphUpdater(ingestor=ingestor, filesystem=filesystem)
+        # Run the graph updater with socket_id for embedding source extraction
+        updater = RemoteGraphUpdater(
+            ingestor=ingestor, 
+            filesystem=filesystem,
+            socket_id=socket_id
+        )
         await updater.run()
         
         logger.info(f"Ingestion complete for project '{project_name}'")
