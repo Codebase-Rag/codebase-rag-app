@@ -18,11 +18,31 @@ class LLMGenerationError(Exception):
 
 def _clean_cypher_response(response_text: str) -> str:
     """Utility to clean up common LLM formatting artifacts from a Cypher query."""
-    query = response_text.strip().replace("`", "")
-    if query.startswith("cypher"):
-        query = query[6:].strip()
-    if not query.endswith(";"):
+    import re
+    
+    # Try to extract from markdown code block first
+    # Match ```cypher ... ``` or ``` ... ```
+    code_block_match = re.search(r'```(?:cypher)?\s*(.*?)```', response_text, re.DOTALL | re.IGNORECASE)
+    if code_block_match:
+        query = code_block_match.group(1).strip()
+    else:
+        # Fallback: look for MATCH statement
+        match_idx = response_text.upper().find('MATCH')
+        if match_idx != -1:
+            query = response_text[match_idx:].strip()
+        else:
+            query = response_text.strip()
+    
+    # Clean up any remaining backticks
+    query = query.replace("`", "")
+    
+    # Remove trailing semicolons and prose after the query
+    # Find the last RETURN/DELETE/CREATE/MERGE clause and trim after semicolon
+    if ";" in query:
+        query = query.split(";")[0].strip() + ";"
+    elif not query.endswith(";"):
         query += ";"
+    
     return query
 
 

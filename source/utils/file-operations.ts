@@ -1,11 +1,22 @@
 import fs from 'fs/promises';
 import path from 'path';
+import { glob } from 'glob';
 
 
 export interface FileSystemResult {
 	ok: boolean;
 	content?: string | Uint8Array;
 	error?: string;
+}
+
+export interface FileUpload {
+    path: string
+    name: string
+    is_dir: boolean
+    is_file: boolean
+    content?: string
+    extension: string
+    size: number
 }
 
 /**
@@ -68,4 +79,22 @@ export async function writeFile(filePath: string, content: string, workspace: st
 	} catch (err: any) {
 		return { ok: false, error: err.message };
 	}
+}
+
+export async function processFiles(workspace: string): Promise<FileUpload[]> {
+    const files: FileUpload[] = [];
+    for await (const file of glob.stream('**/*', { cwd: workspace })) {
+        const stat = await fs.stat(path.join(workspace, file));
+        const isDir = stat.isDirectory();
+        files.push({
+            path: file,
+            name: path.basename(file),
+            is_dir: isDir,
+            is_file: !isDir,
+            content: isDir ? undefined : await fs.readFile(path.join(workspace, file), { encoding: 'base64' }),
+            extension: path.extname(file),
+            size: stat.size,
+        });
+    }
+    return files;
 }

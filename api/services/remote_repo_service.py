@@ -5,10 +5,12 @@ from rich.prompt import Confirm
 from typing import Any, AsyncGenerator
 from codebase_rag.main import _handle_rejection
 from codebase_rag.graph_updater import MemgraphIngestor
+from codebase_rag.remote_graph_updater import RemoteGraphUpdater
+from codebase_rag.filesystem import UploadedFilesystem
 from models.session import Session
 from codebase_rag.tools.codebase_query import create_query_tool
 from codebase_rag.services.llm import CypherGenerator, create_rag_orchestrator
-from codebase_rag.tools.code_retrieval import CodeRetriever, create_code_retrieval_tool
+from codebase_rag.tools.remote_code_retrieval import RemoteCodeRetriever, create_code_retrieval_tool
 from codebase_rag.tools.remote_file_reader import RemoteFileReader, create_file_reader_tool
 from codebase_rag.tools.remote_file_writer import RemoteFileWriter, create_file_writer_tool
 from codebase_rag.tools.remote_file_editor import RemoteFileEditor, create_file_editor_tool
@@ -20,6 +22,7 @@ from codebase_rag.services.llm import CypherGenerator, create_rag_orchestrator
 from sockets.server import sio
 from prompt.agent import agent_instruction
 from pydantic_ai.messages import ModelResponse, ToolCallPart
+from loguru import logger
 import uuid
 import json
 import asyncio
@@ -70,7 +73,7 @@ def _initialize_services_and_agent(ingestor: MemgraphIngestor, socket_id: str) -
     _validate_provider_config("cypher", settings.active_cypher_config)
 
     cypher_generator = CypherGenerator()
-    code_retriever = CodeRetriever(project_root='.', ingestor=ingestor)
+    code_retriever = RemoteCodeRetriever(socket_id=socket_id, ingestor=ingestor)
     file_reader = RemoteFileReader(socket_id=socket_id)
     file_writer = RemoteFileWriter(socket_id=socket_id)
     file_editor = RemoteFileEditor(socket_id=socket_id)
@@ -170,4 +173,36 @@ async def discard_changes(socket_id: str, session_id: str):
         history = Session.get(session_id)
         await _handle_rejection(rag_agent, history, console)
         Session.set(session_id, history)
+
+
+async def ingest_uploaded(project_name: str, socket_id: str, files: list[dict]) -> None:
+    """
+    Ingest uploaded project files into the knowledge graph.
+    
+    Args:
+        project_name: Name for the project in the graph
+        socket_id: Socket.io connection ID for reading files during embedding
+        files: List of file dicts with path, name, is_dir, is_file, content, etc.
+    """
+    logger.info(f"Starting ingestion for project '{project_name}' with {len(files)} files")
+    
+    with MemgraphIngestor(
+        host=settings.MEMGRAPH_HOST,
+        port=settings.MEMGRAPH_PORT,
+    ) as ingestor:
+        logger.info("Connected to Memgraph")
+        ingestor.ensure_constraints()
+        
+        # Create filesystem from uploaded data
+        filesystem = UploadedFilesystem(project_name=project_name, files=files)
+        
+        # Run the graph updater with socket_id for embedding source extraction
+        updater = RemoteGraphUpdater(
+            ingestor=ingestor, 
+            filesystem=filesystem,
+            socket_id=socket_id
+        )
+        await updater.run()
+        
+        logger.info(f"Ingestion complete for project '{project_name}'")
 

@@ -57,11 +57,20 @@ class RemoteCodeRetriever:
                     error_message="Graph entry is missing location data.",
                 )
 
-            # full_path = self.project_root / file_path_str
-            # with full_path.open("r", encoding="utf-8") as f:
-            #     all_lines = f.readlines()
-            all_lines = await sio.call('file:read', {'file_path': file_path_str}, to=self.socket_id)
+            response = await sio.call('file:read', {'file_path': file_path_str}, to=self.socket_id)
 
+            if not response.get('ok'):
+                return CodeSnippet(
+                    qualified_name=qualified_name,
+                    source_code="",
+                    file_path=file_path_str,
+                    line_start=0,
+                    line_end=0,
+                    found=False,
+                    error_message=response.get('error', 'Failed to read file'),
+                )
+
+            all_lines = response.get('content', '').splitlines(keepends=True)
             snippet_lines = all_lines[start_line - 1 : end_line]
             source_code = "".join(snippet_lines)
 
