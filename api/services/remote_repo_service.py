@@ -10,7 +10,7 @@ from codebase_rag.filesystem import UploadedFilesystem
 from models.session import Session
 from codebase_rag.tools.codebase_query import create_query_tool
 from codebase_rag.services.llm import CypherGenerator, create_rag_orchestrator
-from codebase_rag.tools.code_retrieval import CodeRetriever, create_code_retrieval_tool
+from codebase_rag.tools.remote_code_retrieval import RemoteCodeRetriever, create_code_retrieval_tool
 from codebase_rag.tools.remote_file_reader import RemoteFileReader, create_file_reader_tool
 from codebase_rag.tools.remote_file_writer import RemoteFileWriter, create_file_writer_tool
 from codebase_rag.tools.remote_file_editor import RemoteFileEditor, create_file_editor_tool
@@ -73,7 +73,7 @@ def _initialize_services_and_agent(ingestor: MemgraphIngestor, socket_id: str) -
     _validate_provider_config("cypher", settings.active_cypher_config)
 
     cypher_generator = CypherGenerator()
-    code_retriever = CodeRetriever(project_root='.', ingestor=ingestor)
+    code_retriever = RemoteCodeRetriever(socket_id=socket_id, ingestor=ingestor)
     file_reader = RemoteFileReader(socket_id=socket_id)
     file_writer = RemoteFileWriter(socket_id=socket_id)
     file_editor = RemoteFileEditor(socket_id=socket_id)
