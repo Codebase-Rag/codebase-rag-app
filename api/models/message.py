@@ -9,7 +9,7 @@ class Message(TypedDict):
     __tablename__ = "messages"
 
     id = Column(Integer(), primary_key=True)
-    session_id = Column(Integer(), ForeignKey("chat_sessions.id"))
+    session_id = Column(Integer(), ForeignKey("chat_sessions.id", ondelete="CASCADE"))
     type = Column(String(100), nullable=False)
     timestamp = Column(DateTime(), default=datetime.now)
     content = Column(JSONB)

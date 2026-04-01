@@ -8,7 +8,6 @@ class ChatSession(Base):
 
     id = Column(Integer(), primary_key=True)
     summary = Column(String(100), nullable=False)
-    workspace = Column(String(100), nullable=False)
     created_on = Column(DateTime(), default=datetime.now)
     updated_on = Column(DateTime(), default=datetime.now, onupdate=datetime.now)
     message = relationship("Message", back_populates="chat_sessions")

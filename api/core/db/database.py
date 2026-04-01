@@ -2,11 +2,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from core.config import settings
 import redis
-
-
-class Base(DeclarativeBase):
-    pass
-
+from core.db.models import Base
 
 DATABASE_URL = (
     f"postgresql://{settings.POSTGRES_USER}:{settings.POSTGRES_PASSWORD}"
@@ -19,7 +15,7 @@ SessionLocal = sessionmaker(bind=engine)
 
 def init_db() -> None:
     """Create all tables if they don't exist."""
-    import models.session  # noqa: F401 — ensure models are registered on Base
+    from models import ChatSession, Message
     Base.metadata.create_all(bind=engine)
 
 

@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from services.remote_repo_service import query, query_stream, discard_changes, ingest_uploaded
 from typing import Optional
 import base64
+import uuid
 
 class QueryRequest(BaseModel):
     question: str
@@ -88,6 +89,7 @@ async def ingest_repo(request: IngestRequest):
                 "status": "success",
                 "message": f"Successfully ingested project: {request.project_name}",
                 "files_processed": len(files_data),
+                # "session_id": str(uuid.uuid4()),
             },
             status_code=status.HTTP_200_OK
         )

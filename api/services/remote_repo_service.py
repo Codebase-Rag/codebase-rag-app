@@ -19,13 +19,21 @@ from codebase_rag.tools.remote_directory_lister import RemoteDirectoryLister, cr
 from codebase_rag.tools.remote_document_analyzer import RemoteDocumentAnalyzer, create_document_analyzer_tool
 from codebase_rag.tools.semantic_search import create_semantic_search_tool, create_get_function_source_tool
 from codebase_rag.services.llm import CypherGenerator, create_rag_orchestrator
+from services.message_service import MessageService
+from services.chat_session_service import ChatSessionService
+from models.chat_session import ChatSession
+from core.db.database import redis_client, SessionLocal
 from sockets.server import sio
 from prompt.agent import agent_instruction
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from loguru import logger
-import uuid
 import json
 import asyncio
+from core.db.database import redis_client
+from models.message import Message
+
+import uuid
+from pydantic_ai.messages import ModelMessage
 
 console = Console(width=None, force_terminal=True)
 confirm_edits_globally = True
@@ -115,12 +123,20 @@ async def query_stream(question: str, mode: str, socket_id: str, session_id: str
         host=settings.MEMGRAPH_HOST,
         port=settings.MEMGRAPH_PORT,
     ) as ingestor:
-        history = []
+        history: list[ModelMessage] = []
         rag_agent = _initialize_services_and_agent(ingestor, socket_id=socket_id)
+        message_service = MessageService(SessionLocal)
         if session_id == None:
+            session_service = ChatSessionService(SessionLocal)
             session_id = str(uuid.uuid4())
+            session_service.create(ChatSession(
+                id=session_id, 
+                summary="",
+            ))
         else:
-            history = Session.get(session_id)
+            messages = message_service.get_by_session(session_id=session_id)
+            history = [ModelMessage(**msg.content) for msg in messages]
+        print(history)
         question_with_context = question
         if mode == 'agent' and len(history) == 0:
              question_with_context = agent_instruction.format(question=question)
@@ -139,11 +155,11 @@ async def query_stream(question: str, mode: str, socket_id: str, session_id: str
             yield "data: [DONE]\n\n"
         
         # Update session history after streaming completes
-        history.extend(response.new_messages())
-        Session.set(session_id, history)
+        for msg in response.new_messages():
+            message_service.create(Message(session_id=session_id, content=msg))
 
 
-async def query(question: str, mode: str, socket_id: str, session_id: str = None):
+async def query(question: str, mode: str, socket_id: str, session_id: str):
     with MemgraphIngestor(
         host=settings.MEMGRAPH_HOST,
         port=settings.MEMGRAPH_PORT,
@@ -195,7 +211,7 @@ async def ingest_uploaded(project_name: str, socket_id: str, files: list[dict]) 
         
         # Create filesystem from uploaded data
         filesystem = UploadedFilesystem(project_name=project_name, files=files)
-        
+    
         # Run the graph updater with socket_id for embedding source extraction
         updater = RemoteGraphUpdater(
             ingestor=ingestor, 
@@ -205,4 +221,5 @@ async def ingest_uploaded(project_name: str, socket_id: str, files: list[dict]) 
         await updater.run()
         
         logger.info(f"Ingestion complete for project '{project_name}'")
+
 
