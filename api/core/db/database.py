@@ -15,7 +15,7 @@ SessionLocal = sessionmaker(bind=engine)
 
 def init_db() -> None:
     """Create all tables if they don't exist."""
-    from models import ChatSession, Message
+    from models import Message, ChatSession
     Base.metadata.create_all(bind=engine)
 
 

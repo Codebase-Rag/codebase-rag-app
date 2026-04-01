@@ -21,22 +21,34 @@ from codebase_rag.tools.semantic_search import create_semantic_search_tool, crea
 from codebase_rag.services.llm import CypherGenerator, create_rag_orchestrator
 from services.message_service import MessageService
 from services.chat_session_service import ChatSessionService
-from models.chat_session import ChatSession
 from core.db.database import redis_client, SessionLocal
 from sockets.server import sio
 from prompt.agent import agent_instruction
-from pydantic_ai.messages import ModelResponse, ToolCallPart
+from pydantic_ai.messages import ModelResponse, ToolCallPart, ModelRequest
 from loguru import logger
 import json
 import asyncio
 from core.db.database import redis_client
-from models.message import Message
+from datetime import datetime, timezone
+from dataclasses import asdict, fields
 
 import uuid
 from pydantic_ai.messages import ModelMessage
 
 console = Console(width=None, force_terminal=True)
 confirm_edits_globally = True
+
+
+def _deserialize_message(content: dict) -> ModelMessage:
+    """Convert stored dict back to ModelRequest or ModelResponse."""
+    kind = content.get("kind")
+    if kind == "request":
+        return ModelRequest(**content)
+    elif kind == "response":
+        return ModelResponse(**content)
+    else:
+        raise ValueError(f"Unknown message kind: {kind}")
+
 
 # Tool names that indicate file modifications were made
 _EDIT_TOOL_NAMES = frozenset([
@@ -117,7 +129,7 @@ def _initialize_services_and_agent(ingestor: MemgraphIngestor, socket_id: str) -
     return rag_agent
 
 
-async def query_stream(question: str, mode: str, socket_id: str, session_id: str = None) -> AsyncGenerator[str, None]:
+async def query_stream(question: str, mode: str, socket_id: str, session_id: int = None) -> AsyncGenerator[str, None]:
     """Stream query response token by token."""
     with MemgraphIngestor(
         host=settings.MEMGRAPH_HOST,
@@ -125,38 +137,45 @@ async def query_stream(question: str, mode: str, socket_id: str, session_id: str
     ) as ingestor:
         history: list[ModelMessage] = []
         rag_agent = _initialize_services_and_agent(ingestor, socket_id=socket_id)
-        message_service = MessageService(SessionLocal)
-        if session_id == None:
-            session_service = ChatSessionService(SessionLocal)
-            session_id = str(uuid.uuid4())
-            session_service.create(ChatSession(
-                id=session_id, 
-                summary="",
-            ))
-        else:
-            messages = message_service.get_by_session(session_id=session_id)
-            history = [ModelMessage(**msg.content) for msg in messages]
-        print(history)
-        question_with_context = question
-        if mode == 'agent' and len(history) == 0:
-             question_with_context = agent_instruction.format(question=question)
-        
-        # Use stream method for streaming response
-        async with rag_agent.run_stream(question_with_context, message_history=history) as response:
-            # First, yield session_id and edit status as a special message
-            edit = has_edit_tool_calls(response)
-            yield f"data: {json.dumps({'session_id': session_id, 'edit': edit})}\n\n"
+        db = SessionLocal()
+        try:
+            message_service = MessageService(db)
+            if session_id == None:
+                session_service = ChatSessionService(db)
+                session = session_service.create({
+                    "summary": "",
+                })
+                session_id = session.id
+            else:
+                messages = message_service.get_by_session(session_id=session_id)
+                history = [_deserialize_message(msg.content) for msg in messages]
+            print(history)
+            question_with_context = question
+            if mode == 'agent' and len(history) == 0:
+                 question_with_context = agent_instruction.format(question=question)
             
-            # Stream the output token by token
-            async for chunk in response.stream():
-                yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+            # Use stream method for streaming response
+            async with rag_agent.run_stream(question_with_context, message_history=history) as response:
+                # First, yield session_id and edit status as a special message
+                edit = has_edit_tool_calls(response)
+                yield f"data: {json.dumps({'session_id': session_id, 'edit': edit})}\n\n"
+                
+                # Stream the output token by token
+                async for chunk in response.stream():
+                    yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+                
+                # Yield end marker
+                yield "data: [DONE]\n\n"
             
-            # Yield end marker
-            yield "data: [DONE]\n\n"
-        
-        # Update session history after streaming completes
-        for msg in response.new_messages():
-            message_service.create(Message(session_id=session_id, content=msg))
+            # Update session history after streaming completes
+            for msg in response.new_messages():
+                message_service.create({
+                    "session_id": session_id, 
+                    "type": "request" if isinstance(msg, ModelRequest) else "response",
+                    "content": json.loads(json.dumps(asdict(msg), default=str)), 
+                })
+        finally:
+            db.close()
 
 
 async def query(question: str, mode: str, socket_id: str, session_id: str):

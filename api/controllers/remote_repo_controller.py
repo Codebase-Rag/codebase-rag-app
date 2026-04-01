@@ -10,7 +10,7 @@ class QueryRequest(BaseModel):
     question: str
     socket_id: str
     mode: str
-    session_id: Optional[str] = None
+    session_id: Optional[int] = None
 
 
 class FileUpload(BaseModel):

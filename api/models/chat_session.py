@@ -10,5 +10,5 @@ class ChatSession(Base):
     summary = Column(String(100), nullable=False)
     created_on = Column(DateTime(), default=datetime.now)
     updated_on = Column(DateTime(), default=datetime.now, onupdate=datetime.now)
-    message = relationship("Message", back_populates="chat_sessions")
+    message = relationship("Message", back_populates="chat_session")
     

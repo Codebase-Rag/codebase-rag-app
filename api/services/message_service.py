@@ -1,6 +1,6 @@
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from models.message import Message
+from models import Message
 
 
 class MessageService:
