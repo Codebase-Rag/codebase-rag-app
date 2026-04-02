@@ -1,4 +1,5 @@
 from typing import List, Optional
+from uuid import UUID
 from sqlalchemy.orm import Session
 from models import ChatSession
 
@@ -9,7 +10,7 @@ class ChatSessionService:
     def __init__(self, db: Session):
         self.db = db
 
-    def get(self, id: int) -> Optional[ChatSession]:
+    def get(self, id: UUID) -> Optional[ChatSession]:
         return self.db.query(ChatSession).filter(ChatSession.id == id).first()
 
     def get_all(self, skip: int = 0, limit: int = 100) -> List[ChatSession]:
@@ -22,7 +23,7 @@ class ChatSessionService:
         self.db.refresh(session)
         return session
 
-    def update(self, id: int, data: dict) -> Optional[ChatSession]:
+    def update(self, id: UUID, data: dict) -> Optional[ChatSession]:
         session = self.get(id)
         if session:
             for key, value in data.items():
@@ -31,7 +32,7 @@ class ChatSessionService:
             self.db.refresh(session)
         return session
 
-    def delete(self, id: int) -> bool:
+    def delete(self, id: UUID) -> bool:
         session = self.get(id)
         if session:
             self.db.delete(session)

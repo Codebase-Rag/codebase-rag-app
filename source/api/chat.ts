@@ -2,8 +2,8 @@ export async function sendMessage(
     question: string,  
     socketId: string,
     mode: string, 
-    sessionId?: number, 
-): Promise<{session_id: number, response: string, edit: boolean}> {
+    sessionId?: string, 
+): Promise<{session_id: string, response: string, edit: boolean}> {
     const res = await fetch(`${process.env['BACKEND_URI']}/remote/repo/query`, {
         method: "POST", 
         headers: {
@@ -25,7 +25,7 @@ export async function sendMessageStream(
     question: string,  
     socketId: string,
     mode: string, 
-    sessionId?: number, 
+    sessionId?: string, 
 ): Promise<ReadableStream<Uint8Array>> {
     const res = await fetch(`${process.env['BACKEND_URI']}/remote/repo/query/stream`, {
         method: "POST", 
@@ -46,7 +46,7 @@ export async function sendMessageStream(
 
 export async function rejectChange(
     socketId: string,
-    sessionId: number, 
+    sessionId: string, 
 ): Promise<{response: string}> {
     const res = await fetch(`${process.env['BACKEND_URI']}/remote/repo/reject/sessions/${sessionId}?socket_id=${encodeURIComponent(socketId)}`, {
         method: "DELETE", 

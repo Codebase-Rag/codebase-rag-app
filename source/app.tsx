@@ -27,7 +27,7 @@ export default function App() {
 	const [isLoading, setIsLoading] = useState(false);
 	const [uploading, setUploading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const [sessionId, setSessionId] = useState<number | null>(null);
+	const [sessionId, setSessionId] = useState<string | null>(null);
 	const [mode, setMode] = useState<string | null>(null);
 	const [pendingReview, setPendingReview] = useState(false);
 	const modes = [

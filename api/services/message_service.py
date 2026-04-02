@@ -1,4 +1,5 @@
 from typing import List, Optional
+from uuid import UUID
 from sqlalchemy.orm import Session
 from models import Message
 
@@ -9,7 +10,7 @@ class MessageService:
     def __init__(self, db: Session):
         self.db = db
 
-    def get(self, id: int) -> Optional[Message]:
+    def get(self, id: UUID) -> Optional[Message]:
         return self.db.query(Message).filter(Message.id == id).first()
 
     def get_all(self, skip: int = 0, limit: int = 100) -> List[Message]:
@@ -22,7 +23,7 @@ class MessageService:
         self.db.refresh(message)
         return message
 
-    def update(self, id: int, data: dict) -> Optional[Message]:
+    def update(self, id: UUID, data: dict) -> Optional[Message]:
         message = self.get(id)
         if message:
             for key, value in data.items():
@@ -31,7 +32,7 @@ class MessageService:
             self.db.refresh(message)
         return message
 
-    def delete(self, id: int) -> bool:
+    def delete(self, id: UUID) -> bool:
         message = self.get(id)
         if message:
             self.db.delete(message)
@@ -39,7 +40,7 @@ class MessageService:
             return True
         return False
 
-    def get_by_session(self, session_id: int) -> List[Message]:
+    def get_by_session(self, session_id: UUID) -> List[Message]:
         return (
             self.db.query(Message)
             .filter(Message.session_id == session_id)
@@ -47,14 +48,14 @@ class MessageService:
             .all()
         )
 
-    def get_by_session_and_type(self, session_id: int, message_type: str) -> List[Message]:
+    def get_by_session_and_type(self, session_id: UUID, message_type: str) -> List[Message]:
         return (
             self.db.query(Message)
             .filter(Message.session_id == session_id, Message.type == message_type)
             .all()
         )
 
-    def delete_by_session(self, session_id: int) -> int:
+    def delete_by_session(self, session_id: UUID) -> int:
         """Delete all messages for a session. Returns count of deleted messages."""
         count = self.db.query(Message).filter(Message.session_id == session_id).delete()
         self.db.commit()

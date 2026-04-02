@@ -3,6 +3,7 @@ from core.config import settings
 from rich.console import Console
 from rich.prompt import Confirm
 from typing import Any, AsyncGenerator
+from uuid import UUID
 from codebase_rag.main import _handle_rejection
 from codebase_rag.graph_updater import MemgraphIngestor
 from codebase_rag.remote_graph_updater import RemoteGraphUpdater
@@ -127,7 +128,7 @@ def _initialize_services_and_agent(ingestor: MemgraphIngestor, socket_id: str) -
     return rag_agent
 
 
-async def query_stream(question: str, mode: str, socket_id: str, session_id: int = None) -> AsyncGenerator[str, None]:
+async def query_stream(question: str, mode: str, socket_id: str, session_id: UUID = None) -> AsyncGenerator[str, None]:
     """Stream query response token by token."""
     with MemgraphIngestor(
         host=settings.MEMGRAPH_HOST,
@@ -147,7 +148,6 @@ async def query_stream(question: str, mode: str, socket_id: str, session_id: int
             else:
                 messages = message_service.get_by_session(session_id=session_id)
                 history = [_deserialize_message(msg.content) for msg in messages]
-            print(history)
             question_with_context = question
             if mode == 'agent' and len(history) == 0:
                  question_with_context = agent_instruction.format(question=question)
@@ -156,7 +156,7 @@ async def query_stream(question: str, mode: str, socket_id: str, session_id: int
             async with rag_agent.run_stream(question_with_context, message_history=history) as response:
                 # First, yield session_id and edit status as a special message
                 edit = has_edit_tool_calls(response)
-                yield f"data: {json.dumps({'session_id': session_id, 'edit': edit})}\n\n"
+                yield f"data: {json.dumps({'session_id': str(session_id), 'edit': edit})}\n\n"
                 
                 # Stream the output token by token
                 async for chunk in response.stream():

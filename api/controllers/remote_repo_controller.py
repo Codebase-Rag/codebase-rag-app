@@ -4,13 +4,13 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from services.remote_repo_service import query, query_stream, discard_changes, ingest_uploaded
 from typing import Optional
 import base64
-import uuid
+from uuid import UUID
 
 class QueryRequest(BaseModel):
     question: str
     socket_id: str
     mode: str
-    session_id: Optional[int] = None
+    session_id: Optional[UUID] = None
 
 
 class FileUpload(BaseModel):
