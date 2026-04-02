@@ -24,30 +24,28 @@ from services.chat_session_service import ChatSessionService
 from core.db.database import redis_client, SessionLocal
 from sockets.server import sio
 from prompt.agent import agent_instruction
-from pydantic_ai.messages import ModelResponse, ToolCallPart, ModelRequest
+from pydantic_ai.messages import ModelResponse, ToolCallPart, ModelRequest, ModelMessage, ModelMessagesTypeAdapter
 from loguru import logger
 import json
 import asyncio
 from core.db.database import redis_client
 from datetime import datetime, timezone
-from dataclasses import asdict, fields
 
 import uuid
-from pydantic_ai.messages import ModelMessage
 
 console = Console(width=None, force_terminal=True)
 confirm_edits_globally = True
 
 
-def _deserialize_message(content: dict) -> ModelMessage:
-    """Convert stored dict back to ModelRequest or ModelResponse."""
-    kind = content.get("kind")
-    if kind == "request":
-        return ModelRequest(**content)
-    elif kind == "response":
-        return ModelResponse(**content)
-    else:
-        raise ValueError(f"Unknown message kind: {kind}")
+def _deserialize_message(content: dict | list) -> ModelMessage:
+    """Convert stored dict back to ModelRequest or ModelResponse using TypeAdapter."""
+    # Content is stored as a list with single message for proper type handling
+    if isinstance(content, list):
+        messages = ModelMessagesTypeAdapter.validate_python(content)
+        return messages[0] if messages else None
+    # Legacy format - wrap in list
+    messages = ModelMessagesTypeAdapter.validate_python([content])
+    return messages[0] if messages else None
 
 
 # Tool names that indicate file modifications were made
@@ -169,10 +167,12 @@ async def query_stream(question: str, mode: str, socket_id: str, session_id: int
             
             # Update session history after streaming completes
             for msg in response.new_messages():
+                # Use TypeAdapter for proper serialization of nested part types
+                content = json.loads(ModelMessagesTypeAdapter.dump_json([msg]))
                 message_service.create({
                     "session_id": session_id, 
                     "type": "request" if isinstance(msg, ModelRequest) else "response",
-                    "content": json.loads(json.dumps(asdict(msg), default=str)), 
+                    "content": content, 
                 })
         finally:
             db.close()
