@@ -19,3 +19,9 @@ wheels/
 .pytest_cache/
 .claude/
 .qdrant_code_embeddings/
+
+# Celery
+.celery.pid
+.celery-beat.pid
+.celery-beat.log
+.celery.log

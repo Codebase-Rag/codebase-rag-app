@@ -22,5 +22,13 @@ def init_db() -> None:
 redis_client = redis.Redis(
     host=settings.REDIS_HOST,
     port=settings.REDIS_PORT,
+    db=settings.FAST_REDIS_DB, 
+    decode_responses=False
+)
+
+celery_redis_client = redis.Redis(
+    host=settings.REDIS_HOST,
+    port=settings.REDIS_PORT,
+    db=settings.CELERY_REDIS_DB, 
     decode_responses=False
 )

@@ -3,7 +3,8 @@ from controllers.graph_controller import router as graph_router
 from controllers.repo_controller import router as repo_router
 from controllers.repo_extension_controller import router as repo_extension_router
 from controllers.remote_repo_controller import router as remote_repo_router
-from controllers.session_controller import router as session_router
+from controllers.chat_session_controller import router as session_router
+from controllers.message_controller import router as message_router
 from fastapi.middleware.cors import CORSMiddleware
 from sockets.server import sio
 import socketio
@@ -34,6 +35,7 @@ app.include_router(repo_router)
 app.include_router(repo_extension_router)
 app.include_router(remote_repo_router)
 app.include_router(session_router)
+app.include_router(message_router)
 
 socket_app = socketio.ASGIApp(
 	sio,

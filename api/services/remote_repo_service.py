@@ -22,6 +22,7 @@ from codebase_rag.tools.semantic_search import create_semantic_search_tool, crea
 from codebase_rag.services.llm import CypherGenerator, create_rag_orchestrator
 from services.message_service import MessageService
 from services.chat_session_service import ChatSessionService
+from services.session_service import SessionService
 from core.db.database import redis_client, SessionLocal
 from sockets.server import sio
 from prompt.agent import agent_instruction
@@ -30,6 +31,8 @@ from loguru import logger
 import json
 import asyncio
 from core.db.database import redis_client
+from models.message import Message
+
 from datetime import datetime, timezone
 
 import uuid
@@ -134,48 +137,43 @@ async def query_stream(question: str, mode: str, socket_id: str, session_id: UUI
         host=settings.MEMGRAPH_HOST,
         port=settings.MEMGRAPH_PORT,
     ) as ingestor:
-        history: list[ModelMessage] = []
+        session_service = SessionService()
+        messages: list[Message]
+        if session_id == None: 
+            session_id = str(uuid.uuid4())
+            messages = []
+        else:
+            messages = await session_service.get_session(str(session_id))
         rag_agent = _initialize_services_and_agent(ingestor, socket_id=socket_id)
-        db = SessionLocal()
-        try:
-            message_service = MessageService(db)
-            if session_id == None:
-                session_service = ChatSessionService(db)
-                session = session_service.create({
-                    "summary": "",
-                })
-                session_id = session.id
-            else:
-                messages = message_service.get_by_session(session_id=session_id)
-                history = [_deserialize_message(msg.content) for msg in messages]
-            question_with_context = question
-            if mode == 'agent' and len(history) == 0:
-                 question_with_context = agent_instruction.format(question=question)
+        question_with_context = question
+        if mode == 'agent' and len(messages) == 0:
+                question_with_context = agent_instruction.format(question=question)
+        
+        # Use stream method for streaming response
+        async with rag_agent.run_stream(question_with_context, message_history=[_deserialize_message(msg.content) for msg in messages]) as response:
+            # First, yield session_id and edit status as a special message
+            edit = has_edit_tool_calls(response)
+            yield f"data: {json.dumps({'session_id': str(session_id), 'edit': edit})}\n\n"
             
-            # Use stream method for streaming response
-            async with rag_agent.run_stream(question_with_context, message_history=history) as response:
-                # First, yield session_id and edit status as a special message
-                edit = has_edit_tool_calls(response)
-                yield f"data: {json.dumps({'session_id': str(session_id), 'edit': edit})}\n\n"
-                
-                # Stream the output token by token
-                async for chunk in response.stream():
-                    yield f"data: {json.dumps({'chunk': chunk})}\n\n"
-                
-                # Yield end marker
-                yield "data: [DONE]\n\n"
+            # Stream the output token by token
+            async for chunk in response.stream():
+                yield f"data: {json.dumps({'chunk': chunk})}\n\n"
             
-            # Update session history after streaming completes
-            for msg in response.new_messages():
-                # Use TypeAdapter for proper serialization of nested part types
-                content = json.loads(ModelMessagesTypeAdapter.dump_json([msg]))
-                message_service.create({
-                    "session_id": session_id, 
-                    "type": "request" if isinstance(msg, ModelRequest) else "response",
-                    "content": content, 
-                })
-        finally:
-            db.close()
+            # Yield end marker
+            yield "data: [DONE]\n\n"
+        
+        # Update session history after streaming completes
+        for msg in response.new_messages():
+            # Use TypeAdapter for proper serialization of nested part types
+            content = json.loads(ModelMessagesTypeAdapter.dump_json([msg]))
+            messages.append(
+                Message(
+                    session_id=session_id, 
+                    type="request" if isinstance(msg, ModelRequest) else "response",
+                    content=content, 
+                )
+            )
+        await session_service.update_session(str(session_id), messages)
 
 
 async def query(question: str, mode: str, socket_id: str, session_id: str):
