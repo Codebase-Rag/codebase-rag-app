@@ -25,7 +25,7 @@ from services.chat_session_service import ChatSessionService
 from services.session_service import SessionService
 from core.db.database import redis_client, SessionLocal
 from sockets.server import sio
-from prompt.agent import agent_instruction
+from prompts.agent import agent_instruction
 from pydantic_ai.messages import ModelResponse, ToolCallPart, ModelRequest, ModelMessage, ModelMessagesTypeAdapter
 from loguru import logger
 import json
