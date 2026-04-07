@@ -42,9 +42,9 @@ class MemgraphIngestor:
     ) -> None:
         if exc_type:
             logger.error(
-                f"An exception occurred: {exc_val}. Flushing remaining items...",
-                exc_info=True,
+                f"An exception occurred: {exc_val!r}. Flushing remaining items..."
             )
+            logger.exception("Exception details:")
         self.flush_all()
         if self.conn:
             self.conn.close()

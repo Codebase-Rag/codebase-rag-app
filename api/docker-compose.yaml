@@ -14,6 +14,32 @@ services:
   #     - redis
   #     - postgres
   #   restart: unless-stopped
+
+  # celery-worker:
+  #   image: e3ancc/codebase-rag-api:latest
+  #   command: uv run celery -A celery_app.main worker --loglevel=info
+  #   env_file:
+  #     - .env
+  #   environment:
+  #     MEMGRAPH_HOST: memgraph
+  #     REDIS_HOST: redis
+  #     POSTGRES_HOST: postgres
+  #   depends_on:
+  #     - redis
+  #     - postgres
+  #   restart: unless-stopped
+
+  # celery-beat:
+  #   image: e3ancc/codebase-rag-api:latest
+  #   command: uv run celery -A celery_app.main beat --loglevel=info
+  #   env_file:
+  #     - .env
+  #   environment:
+  #     REDIS_HOST: redis
+  #   depends_on:
+  #     - redis
+  #   restart: unless-stopped
+
   memgraph:
     image: memgraph/memgraph-mage
     ports:

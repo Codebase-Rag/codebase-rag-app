@@ -49,6 +49,8 @@ class AppConfig(BaseSettings):
     # Redis settings
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
+    CELERY_REDIS_DB: int = 0
+    FAST_REDIS_DB: int = 1
 
     # Postgres settings
     POSTGRES_HOST: str = "localhost"

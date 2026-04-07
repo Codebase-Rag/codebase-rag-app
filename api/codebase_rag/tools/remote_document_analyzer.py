@@ -133,7 +133,7 @@ class RemoteDocumentAnalyzer:
 def create_document_analyzer_tool(analyzer: RemoteDocumentAnalyzer) -> Tool:
     """Factory function to create the document analyzer tool."""
 
-    def analyze_document(file_path: str, question: str) -> str:
+    async def analyze_document(file_path: str, question: str) -> str:
         """
         Analyzes a document (like a PDF) to answer a specific question about its content.
         Use this tool when a user asks a question that requires understanding the content of a non-source-code file.
@@ -143,7 +143,7 @@ def create_document_analyzer_tool(analyzer: RemoteDocumentAnalyzer) -> Tool:
             question: The specific question to ask about the document's content.
         """
         try:
-            result = analyzer.analyze(file_path, question)
+            result = await analyzer.analyze(file_path, question)
             logger.debug(
                 f"[analyze_document] Result type: {type(result)}, content: {result[:100] if result else 'None'}..."
             )

@@ -1,7 +1,66 @@
-run:
+CELERY_PIDFILE := .celery.pid
+CELERY_BEAT_PIDFILE := .celery-beat.pid
+CELERY_LOGFILE := .celery.log
+CELERY_BEAT_LOGFILE := .celery-beat.log
+
+run: ## Run FastAPI only (for local dev with Docker Compose providing infra)
 	uv run main.py
-	
-.PHONY: help all install dev test clean python
+
+run-all: ## Run FastAPI + Celery locally (Ctrl+C stops all)
+	@uv run celery -A celery_app.main worker --loglevel=info --logfile=$(CELERY_LOGFILE) --pidfile=$(CELERY_PIDFILE) & \
+	uv run celery -A celery_app.main beat --loglevel=info --logfile=$(CELERY_BEAT_LOGFILE) --pidfile=$(CELERY_BEAT_PIDFILE) & \
+	trap 'kill $$(cat $(CELERY_PIDFILE) 2>/dev/null) $$(cat $(CELERY_BEAT_PIDFILE) 2>/dev/null) 2>/dev/null; rm -f $(CELERY_PIDFILE) $(CELERY_BEAT_PIDFILE)' EXIT; \
+	uv run main.py
+
+celery-start: ## Start Celery worker and beat in background (persistent)
+	@if [ -f $(CELERY_PIDFILE) ] && kill -0 $$(cat $(CELERY_PIDFILE)) 2>/dev/null; then \
+		echo "Celery worker already running (PID: $$(cat $(CELERY_PIDFILE)))"; \
+	else \
+		echo "Starting Celery worker..."; \
+		uv run celery -A celery_app.main worker --loglevel=info --pidfile=$(CELERY_PIDFILE) --logfile=$(CELERY_LOGFILE) --detach; \
+	fi
+	@if [ -f $(CELERY_BEAT_PIDFILE) ] && kill -0 $$(cat $(CELERY_BEAT_PIDFILE)) 2>/dev/null; then \
+		echo "Celery beat already running (PID: $$(cat $(CELERY_BEAT_PIDFILE)))"; \
+	else \
+		echo "Starting Celery beat..."; \
+		uv run celery -A celery_app.main beat --loglevel=info --pidfile=$(CELERY_BEAT_PIDFILE) --logfile=$(CELERY_BEAT_LOGFILE) --detach; \
+	fi
+
+celery-logs: ## Tail Celery logs (Ctrl+C to stop)
+	tail -f $(CELERY_LOGFILE) $(CELERY_BEAT_LOGFILE)
+
+celery-foreground: ## Run Celery in foreground (for debugging)
+	uv run celery -A celery_app.main worker --beat --loglevel=info
+
+celery-stop: ## Stop Celery worker and beat
+	@if [ -f $(CELERY_PIDFILE) ]; then \
+		echo "Stopping Celery worker (PID: $$(cat $(CELERY_PIDFILE)))..."; \
+		kill $$(cat $(CELERY_PIDFILE)) 2>/dev/null || true; \
+		rm -f $(CELERY_PIDFILE); \
+	else \
+		echo "No Celery worker PID file found"; \
+	fi
+	@if [ -f $(CELERY_BEAT_PIDFILE) ]; then \
+		echo "Stopping Celery beat (PID: $$(cat $(CELERY_BEAT_PIDFILE)))..."; \
+		kill $$(cat $(CELERY_BEAT_PIDFILE)) 2>/dev/null || true; \
+		rm -f $(CELERY_BEAT_PIDFILE); \
+	else \
+		echo "No Celery beat PID file found"; \
+	fi
+
+celery-status: ## Check Celery worker and beat status
+	@if [ -f $(CELERY_PIDFILE) ] && kill -0 $$(cat $(CELERY_PIDFILE)) 2>/dev/null; then \
+		echo "Celery worker: running (PID: $$(cat $(CELERY_PIDFILE)))"; \
+	else \
+		echo "Celery worker: stopped"; \
+	fi
+	@if [ -f $(CELERY_BEAT_PIDFILE) ] && kill -0 $$(cat $(CELERY_BEAT_PIDFILE)) 2>/dev/null; then \
+		echo "Celery beat: running (PID: $$(cat $(CELERY_BEAT_PIDFILE)))"; \
+	else \
+		echo "Celery beat: stopped"; \
+	fi
+
+.PHONY: help all install dev test clean python celery-start celery-stop celery-status
 
 help: ## Show this help message
 	@echo "Available targets:"

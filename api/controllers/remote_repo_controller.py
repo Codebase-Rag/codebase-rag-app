@@ -4,12 +4,13 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from services.remote_repo_service import query, query_stream, discard_changes, ingest_uploaded
 from typing import Optional
 import base64
+from uuid import UUID
 
 class QueryRequest(BaseModel):
     question: str
     socket_id: str
     mode: str
-    session_id: Optional[str] = None
+    session_id: Optional[UUID] = None
 
 
 class FileUpload(BaseModel):
@@ -88,6 +89,7 @@ async def ingest_repo(request: IngestRequest):
                 "status": "success",
                 "message": f"Successfully ingested project: {request.project_name}",
                 "files_processed": len(files_data),
+                # "session_id": str(uuid.uuid4()),
             },
             status_code=status.HTTP_200_OK
         )

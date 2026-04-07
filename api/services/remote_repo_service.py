@@ -3,6 +3,7 @@ from core.config import settings
 from rich.console import Console
 from rich.prompt import Confirm
 from typing import Any, AsyncGenerator
+from uuid import UUID
 from codebase_rag.main import _handle_rejection
 from codebase_rag.graph_updater import MemgraphIngestor
 from codebase_rag.remote_graph_updater import RemoteGraphUpdater
@@ -19,16 +20,37 @@ from codebase_rag.tools.remote_directory_lister import RemoteDirectoryLister, cr
 from codebase_rag.tools.remote_document_analyzer import RemoteDocumentAnalyzer, create_document_analyzer_tool
 from codebase_rag.tools.semantic_search import create_semantic_search_tool, create_get_function_source_tool
 from codebase_rag.services.llm import CypherGenerator, create_rag_orchestrator
+from services.message_service import MessageService
+from services.chat_session_service import ChatSessionService
+from services.session_service import SessionService
+from core.db.database import redis_client, SessionLocal
 from sockets.server import sio
 from prompt.agent import agent_instruction
-from pydantic_ai.messages import ModelResponse, ToolCallPart
+from pydantic_ai.messages import ModelResponse, ToolCallPart, ModelRequest, ModelMessage, ModelMessagesTypeAdapter
 from loguru import logger
-import uuid
 import json
 import asyncio
+from core.db.database import redis_client
+from models.message import Message
+
+from datetime import datetime, timezone
+
+import uuid
 
 console = Console(width=None, force_terminal=True)
 confirm_edits_globally = True
+
+
+def _deserialize_message(content: dict | list) -> ModelMessage:
+    """Convert stored dict back to ModelRequest or ModelResponse using TypeAdapter."""
+    # Content is stored as a list with single message for proper type handling
+    if isinstance(content, list):
+        messages = ModelMessagesTypeAdapter.validate_python(content)
+        return messages[0] if messages else None
+    # Legacy format - wrap in list
+    messages = ModelMessagesTypeAdapter.validate_python([content])
+    return messages[0] if messages else None
+
 
 # Tool names that indicate file modifications were made
 _EDIT_TOOL_NAMES = frozenset([
@@ -109,27 +131,29 @@ def _initialize_services_and_agent(ingestor: MemgraphIngestor, socket_id: str) -
     return rag_agent
 
 
-async def query_stream(question: str, mode: str, socket_id: str, session_id: str = None) -> AsyncGenerator[str, None]:
+async def query_stream(question: str, mode: str, socket_id: str, session_id: UUID = None) -> AsyncGenerator[str, None]:
     """Stream query response token by token."""
     with MemgraphIngestor(
         host=settings.MEMGRAPH_HOST,
         port=settings.MEMGRAPH_PORT,
     ) as ingestor:
-        history = []
-        rag_agent = _initialize_services_and_agent(ingestor, socket_id=socket_id)
-        if session_id == None:
+        session_service = SessionService()
+        messages: list[Message]
+        if session_id == None: 
             session_id = str(uuid.uuid4())
+            messages = []
         else:
-            history = Session.get(session_id)
+            messages = await session_service.get_session(str(session_id))
+        rag_agent = _initialize_services_and_agent(ingestor, socket_id=socket_id)
         question_with_context = question
-        if mode == 'agent' and len(history) == 0:
-             question_with_context = agent_instruction.format(question=question)
+        if mode == 'agent' and len(messages) == 0:
+                question_with_context = agent_instruction.format(question=question)
         
         # Use stream method for streaming response
-        async with rag_agent.run_stream(question_with_context, message_history=history) as response:
+        async with rag_agent.run_stream(question_with_context, message_history=[_deserialize_message(msg.content) for msg in messages]) as response:
             # First, yield session_id and edit status as a special message
             edit = has_edit_tool_calls(response)
-            yield f"data: {json.dumps({'session_id': session_id, 'edit': edit})}\n\n"
+            yield f"data: {json.dumps({'session_id': str(session_id), 'edit': edit})}\n\n"
             
             # Stream the output token by token
             async for chunk in response.stream():
@@ -139,11 +163,20 @@ async def query_stream(question: str, mode: str, socket_id: str, session_id: str
             yield "data: [DONE]\n\n"
         
         # Update session history after streaming completes
-        history.extend(response.new_messages())
-        Session.set(session_id, history)
+        for msg in response.new_messages():
+            # Use TypeAdapter for proper serialization of nested part types
+            content = json.loads(ModelMessagesTypeAdapter.dump_json([msg]))
+            messages.append(
+                Message(
+                    session_id=session_id, 
+                    type="request" if isinstance(msg, ModelRequest) else "response",
+                    content=content, 
+                )
+            )
+        await session_service.update_session(str(session_id), messages)
 
 
-async def query(question: str, mode: str, socket_id: str, session_id: str = None):
+async def query(question: str, mode: str, socket_id: str, session_id: str):
     with MemgraphIngestor(
         host=settings.MEMGRAPH_HOST,
         port=settings.MEMGRAPH_PORT,
@@ -195,7 +228,7 @@ async def ingest_uploaded(project_name: str, socket_id: str, files: list[dict]) 
         
         # Create filesystem from uploaded data
         filesystem = UploadedFilesystem(project_name=project_name, files=files)
-        
+    
         # Run the graph updater with socket_id for embedding source extraction
         updater = RemoteGraphUpdater(
             ingestor=ingestor, 
@@ -205,4 +238,5 @@ async def ingest_uploaded(project_name: str, socket_id: str, files: list[dict]) 
         await updater.run()
         
         logger.info(f"Ingestion complete for project '{project_name}'")
+
 
