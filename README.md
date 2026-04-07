@@ -6,19 +6,7 @@ A terminal-based AI coding assistant that uses Retrieval-Augmented Generation (R
 
 ### How It Works
 
-```
-┌──────────────┐       Socket.IO / REST        ┌──────────────────┐
-│   React Ink   │  ◄──────────────────────────►  │   FastAPI + SIO  │
-│   Frontend    │                                │   Backend        │
-└──────────────┘                                └────────┬─────────┘
-                                                         │
-                                       ┌─────────────────┼─────────────────┐
-                                       │                 │                 │
-                                  ┌────▼────┐     ┌──────▼──────┐   ┌─────▼─────┐
-                                  │Memgraph │     │   Redis     │   │ Postgres  │
-                                  │ (Graph) │     │  (Cache)    │   │(Sessions) │
-                                  └─────────┘     └─────────────┘   └───────────┘
-```
+![User Workflow](images/user_workflow.png)
 
 **Backend** — The core of the system lives in `api/`. It uses [Tree-sitter](https://tree-sitter.github.io/tree-sitter/) to parse source code into ASTs, extracting structural entities (modules, classes, functions, methods, imports, call relationships) across multiple languages (Python, TypeScript, JavaScript, Java, C++, Rust, Go, Lua, Scala). These entities and their relationships are ingested into a **Memgraph** knowledge graph.
 
@@ -70,6 +58,18 @@ Then start the API server:
 cd api
 uv sync                  # install Python dependencies
 make                     # starts the FastAPI server on port 8000
+```
+
+Start API server with database synchronization
+```
+cd api
+uv sync                  # install Python dependencies
+make run-all             # starts the FastAPI server on port 8000 and celery for syncing redis with postgre database
+```
+
+Stop Celery background task
+```
+make celery-stop
 ```
 
 You can also access the **Memgraph Lab** UI at `http://localhost:3000` to visually explore the knowledge graph.

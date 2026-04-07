@@ -25,3 +25,4 @@ wheels/
 .celery-beat.pid
 .celery-beat.log
 .celery.log
+celerybeat-schedule
